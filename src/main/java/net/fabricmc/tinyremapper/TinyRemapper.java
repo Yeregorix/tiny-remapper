@@ -149,12 +149,17 @@ public class TinyRemapper {
 			return this;
 		}
 
+        public Builder skipConflictsChecking(boolean value) {
+            skipConflictsChecking = value;
+            return this;
+        }
+
 		public TinyRemapper build() {
 			TinyRemapper remapper = new TinyRemapper(mappingProviders, ignoreFieldDesc, threadCount,
 					keepInputData,
 					forcePropagation, propagatePrivate,
 					removeFrames, ignoreConflicts, resolveMissing, checkPackageAccess || fixPackageAccess, fixPackageAccess,
-					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals,
+					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, skipConflictsChecking,
 					extraAnalyzeVisitor, extraRemapper);
 
 			return remapper;
@@ -174,6 +179,7 @@ public class TinyRemapper {
 		private boolean rebuildSourceFilenames = false;
 		private boolean skipLocalMapping = false;
 		private boolean renameInvalidLocals = false;
+		private boolean skipConflictsChecking = false;
 		private ClassVisitor extraAnalyzeVisitor;
 		private Remapper extraRemapper;
 	}
@@ -190,6 +196,7 @@ public class TinyRemapper {
 			boolean rebuildSourceFilenames,
 			boolean skipLocalMapping,
 			boolean renameInvalidLocals,
+			boolean skipConflictsChecking,
 			ClassVisitor extraAnalyzeVisitor, Remapper extraRemapper) {
 		this.mappingProviders = mappingProviders;
 		this.ignoreFieldDesc = ignoreFieldDesc;
@@ -206,6 +213,7 @@ public class TinyRemapper {
 		this.rebuildSourceFilenames = rebuildSourceFilenames;
 		this.skipLocalMapping = skipLocalMapping;
 		this.renameInvalidLocals = renameInvalidLocals;
+		this.skipConflictsChecking = skipConflictsChecking;
 		this.extraAnalyzeVisitor = extraAnalyzeVisitor;
 		this.extraRemapper = extraRemapper;
 	}
@@ -614,6 +622,7 @@ public class TinyRemapper {
 	}
 
 	private void handleConflicts() {
+	    if (skipConflictsChecking) return;
 		Set<String> testSet = new HashSet<>();
 		boolean targetNameCheckFailed = false;
 
@@ -1031,6 +1040,7 @@ public class TinyRemapper {
 	private final boolean rebuildSourceFilenames;
 	private final boolean skipLocalMapping;
 	private final boolean renameInvalidLocals;
+    private final boolean skipConflictsChecking;
 	private final ClassVisitor extraAnalyzeVisitor;
 	final Remapper extraRemapper;
 
