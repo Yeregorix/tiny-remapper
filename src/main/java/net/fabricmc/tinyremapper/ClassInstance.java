@@ -38,7 +38,7 @@ import net.fabricmc.tinyremapper.MemberInstance.MemberType;
 import net.fabricmc.tinyremapper.TinyRemapper.Direction;
 
 public final class ClassInstance {
-	ClassInstance(TinyRemapper context, boolean isInput, InputTag[] inputTags, Path srcFile, byte[] data) {
+	ClassInstance(TinyRemapper context, boolean isInput, InputTag[] inputTags, String srcFile, byte[] data) {
 		this.context = context;
 		this.isInput = isInput;
 		this.inputTags = inputTags;
@@ -452,7 +452,7 @@ public final class ClassInstance {
 	final TinyRemapper context;
 	final boolean isInput;
 	private volatile InputTag[] inputTags; // cow input tag list, null for none
-	final Path srcPath;
+	final String srcPath;
 	byte[] data;
 	private final Map<String, MemberInstance> members = new HashMap<>(); // methods and fields are distinct due to their different desc separators
 	private final ConcurrentMap<String, MemberInstance> resolvedMembers = new ConcurrentHashMap<>();

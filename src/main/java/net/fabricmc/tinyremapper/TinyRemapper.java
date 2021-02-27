@@ -17,50 +17,24 @@
 
 package net.fabricmc.tinyremapper;
 
+import net.fabricmc.tinyremapper.IMappingProvider.MappingAcceptor;
+import net.fabricmc.tinyremapper.IMappingProvider.Member;
+import net.fabricmc.tinyremapper.MemberInstance.MemberType;
+import org.objectweb.asm.*;
+import org.objectweb.asm.commons.Remapper;
+import org.objectweb.asm.util.CheckClassAdapter;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.FileSystem;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.FieldVisitor;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.commons.Remapper;
-import org.objectweb.asm.util.CheckClassAdapter;
-
-import net.fabricmc.tinyremapper.IMappingProvider.MappingAcceptor;
-import net.fabricmc.tinyremapper.IMappingProvider.Member;
-import net.fabricmc.tinyremapper.MemberInstance.MemberType;
 
 public class TinyRemapper {
 	public static class Builder {
@@ -149,10 +123,15 @@ public class TinyRemapper {
 			return this;
 		}
 
-        public Builder skipConflictsChecking(boolean value) {
-            skipConflictsChecking = value;
-            return this;
-        }
+		public Builder skipConflictsChecking(boolean value) {
+		skipConflictsChecking = value;
+			return this;
+		}
+
+		public Builder cacheMappings(boolean value) {
+			cacheMappings = value;
+			return this;
+		}
 
 		public TinyRemapper build() {
 			TinyRemapper remapper = new TinyRemapper(mappingProviders, ignoreFieldDesc, threadCount,
@@ -160,7 +139,7 @@ public class TinyRemapper {
 					forcePropagation, propagatePrivate,
 					removeFrames, ignoreConflicts, resolveMissing, checkPackageAccess || fixPackageAccess, fixPackageAccess,
 					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, skipConflictsChecking,
-					extraAnalyzeVisitor, extraRemapper);
+					cacheMappings, extraAnalyzeVisitor, extraRemapper);
 
 			return remapper;
 		}
@@ -180,6 +159,7 @@ public class TinyRemapper {
 		private boolean skipLocalMapping = false;
 		private boolean renameInvalidLocals = false;
 		private boolean skipConflictsChecking = false;
+		private boolean cacheMappings = false;
 		private ClassVisitor extraAnalyzeVisitor;
 		private Remapper extraRemapper;
 	}
@@ -197,6 +177,7 @@ public class TinyRemapper {
 			boolean skipLocalMapping,
 			boolean renameInvalidLocals,
 			boolean skipConflictsChecking,
+			boolean cacheMappings,
 			ClassVisitor extraAnalyzeVisitor, Remapper extraRemapper) {
 		this.mappingProviders = mappingProviders;
 		this.ignoreFieldDesc = ignoreFieldDesc;
@@ -214,6 +195,7 @@ public class TinyRemapper {
 		this.skipLocalMapping = skipLocalMapping;
 		this.renameInvalidLocals = renameInvalidLocals;
 		this.skipConflictsChecking = skipConflictsChecking;
+		this.cacheMappings = cacheMappings;
 		this.extraAnalyzeVisitor = extraAnalyzeVisitor;
 		this.extraRemapper = extraRemapper;
 	}
@@ -257,6 +239,28 @@ public class TinyRemapper {
 
 	public void readInputs(InputTag tag, Path... inputs) {
 		read(inputs, true, tag).join();
+	}
+
+	public void readInputs(byte[]... inputs) {
+		readInputsAsync(inputs).join();
+	}
+
+	public CompletableFuture<List<ClassInstance>> readInputsAsync(byte[]... inputs) {
+		InputTag[] tags = singleInputTags.get().get(null);
+		List<CompletableFuture<ClassInstance>> futures = new ArrayList<>();
+		for (byte[] entry : inputs) {
+			futures.add(CompletableFuture.supplyAsync(() -> analyze(true, tags, "/", entry), threadPool));
+		}
+		dirty = true;
+		return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+				.thenApply(ignore -> futures.stream().map(CompletableFuture::join).collect(Collectors.toList()))
+				.whenComplete((res, throwable) -> {
+					if (res != null) {
+						for (ClassInstance node : res) {
+							addClass(node, readClasses);
+						}
+					}
+				});
 	}
 
 	public CompletableFuture<?> readInputsAsync(Path... inputs) {
@@ -359,13 +363,13 @@ public class TinyRemapper {
 	private List<CompletableFuture<List<ClassInstance>>> read(final Path file, boolean isInput, InputTag[] tags,
 			boolean saveData, final List<FileSystem> fsToClose) {
 		try {
-			return read(file, isInput, tags, file, saveData, fsToClose);
+			return read(file, isInput, tags, file.toString(), saveData, fsToClose);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
 	}
 
-	private List<CompletableFuture<List<ClassInstance>>> read(final Path file, boolean isInput, InputTag[] tags, final Path srcPath,
+	private List<CompletableFuture<List<ClassInstance>>> read(final Path file, boolean isInput, InputTag[] tags, final String srcPath,
 			final boolean saveData, final List<FileSystem> fsToClose) throws IOException {
 		List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
 
@@ -400,7 +404,7 @@ public class TinyRemapper {
 		return ret;
 	}
 
-	private List<ClassInstance> readFile(Path file, boolean isInput, InputTag[] tags, final Path srcPath,
+	private List<ClassInstance> readFile(Path file, boolean isInput, InputTag[] tags, final String srcPath,
 			List<FileSystem> fsToClose) throws IOException, URISyntaxException {
 		List<ClassInstance> ret = new ArrayList<ClassInstance>();
 
@@ -428,7 +432,7 @@ public class TinyRemapper {
 		return ret;
 	}
 
-	private ClassInstance analyze(boolean isInput, InputTag[] tags, Path srcPath, byte[] data) {
+	private ClassInstance analyze(boolean isInput, InputTag[] tags, String srcPath, byte[] data) {
 		ClassReader reader = new ClassReader(data);
 		if ((reader.getAccess() & Opcodes.ACC_MODULE) != 0) return null; // special attribute for module-info.class, can't be a regular class
 
@@ -466,7 +470,23 @@ public class TinyRemapper {
 		return remapper.map(className);
 	}
 
-	private void loadMappings() {
+	private void loadMappings(boolean ignoreCached) {
+	    if (ignoreCached) {
+            classMap.clear();
+            methodMap.clear();
+            methodArgMap.clear();
+            fieldMap.clear();
+		
+		    for (ClassInstance node : classes.values()) {
+			    node.parents.clear();
+			    node.children.clear();
+		    }
+            
+            mappingsDirty = true;
+        }
+	    
+	    if (!mappingsDirty) return;
+		mappingsDirty = false;
 		MappingAcceptor acceptor = new MappingAcceptor() {
 			@Override
 			public void acceptClass(String srcName, String dstName) {
@@ -525,6 +545,18 @@ public class TinyRemapper {
 		for (IMappingProvider provider : mappingProviders) {
 			provider.load(acceptor);
 		}
+
+		checkClassMappings();
+		mergeClasspath();
+		propagate();
+	}
+	
+	public void replaceMappings(Collection<IMappingProvider> providers) {
+		if (!this.mappingProviders.equals(providers)) {
+			mappingsDirty = true;
+			mappingProviders.clear();
+			mappingProviders.addAll(providers);
+		}
 	}
 
 	private void checkClassMappings() {
@@ -565,8 +597,9 @@ public class TinyRemapper {
 		}
 	}
 
-	private void merge() {
+	private void mergeClasspath() {
 		for (ClassInstance node : classes.values()) {
+			if (node.isInput) return;
 			assert node.getSuperName() != null;
 
 			ClassInstance parent = classes.get(node.getSuperName());
@@ -583,6 +616,39 @@ public class TinyRemapper {
 					node.parents.add(parent);
 					parent.children.add(node);
 				}
+			}
+		}
+	}
+
+	private void mergeInput() {
+		for (ClassInstance node : classes.values()) {
+			if (!node.isInput) return;
+			assert node.getSuperName() != null;
+			
+			ClassInstance parent = classes.get(node.getSuperName());
+			
+			if (parent != null) {
+				node.parents.add(parent);
+				parent.children.add(node);
+			}
+			
+			for (String iface : node.getInterfaces()) {
+				parent = classes.get(iface);
+				
+				if (parent != null) {
+					node.parents.add(parent);
+					parent.children.add(node);
+				}
+			}
+		}
+	}
+	
+	private void unmergeInput() {
+		for (ClassInstance node : classes.values()) {
+			if (node.isInput) {
+				node.parents.clear();
+			} else {
+				node.children.removeIf(child -> child.isInput);
 			}
 		}
 	}
@@ -807,6 +873,29 @@ public class TinyRemapper {
 		}
 	}
 
+	public void removeInput() {
+		synchronized (this) {
+			unmergeInput();
+			classes.values().removeIf(node -> node.isInput);
+		}
+	}
+
+	public void prepareClasses() {
+		synchronized (this) {
+			_prepareClasses();
+		}
+	}
+
+	private void _prepareClasses() {
+		if (!readClasses.isEmpty()) {
+			for (ClassInstance cls : readClasses.values()) {
+				addClass(cls, classes);
+			}
+			
+			readClasses.clear();
+		}
+	}
+
 	private void refresh() {
 		if (!dirty) {
 			assert pendingReads.isEmpty();
@@ -825,18 +914,9 @@ public class TinyRemapper {
 			pendingReads.clear();
 		}
 
-		if (!readClasses.isEmpty()) {
-			for (ClassInstance cls : readClasses.values()) {
-				addClass(cls, classes);
-			}
-
-			readClasses.clear();
-		}
-
-		loadMappings();
-		checkClassMappings();
-		merge();
-		propagate();
+		_prepareClasses();
+		loadMappings(!cacheMappings);
+		mergeInput();
 
 		assert dirty;
 		dirty = false;
@@ -1041,6 +1121,7 @@ public class TinyRemapper {
 	private final boolean skipLocalMapping;
 	private final boolean renameInvalidLocals;
     private final boolean skipConflictsChecking;
+    private final boolean cacheMappings;
 	private final ClassVisitor extraAnalyzeVisitor;
 	final Remapper extraRemapper;
 
@@ -1063,6 +1144,7 @@ public class TinyRemapper {
 	private final ExecutorService threadPool;
 	private final AsmRemapper remapper = new AsmRemapper(this);
 
+	private boolean mappingsDirty = true;
 	private volatile boolean dirty = true; // volatile to make the state debug asserts more reliable, shouldn't actually see concurrent modifications
 	private Map<ClassInstance, byte[]> outputBuffer;
 }
