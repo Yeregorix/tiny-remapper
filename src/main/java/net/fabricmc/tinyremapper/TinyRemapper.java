@@ -164,7 +164,7 @@ public class TinyRemapper {
 		private Remapper extraRemapper;
 	}
 
-	private TinyRemapper(Collection<IMappingProvider> mappingProviders, boolean ignoreFieldDesc,
+	private TinyRemapper(Set<IMappingProvider> mappingProviders, boolean ignoreFieldDesc,
 			int threadCount,
 			boolean keepInputData,
 			Set<String> forcePropagation, boolean propagatePrivate,
@@ -551,12 +551,20 @@ public class TinyRemapper {
 		propagate();
 	}
 	
-	public void replaceMappings(Collection<IMappingProvider> providers) {
-		if (!this.mappingProviders.equals(providers)) {
+	public void replaceMappings(Set<IMappingProvider> providers) {
+		if (!equalsMappings(providers)) {
 			mappingsDirty = true;
 			mappingProviders.clear();
 			mappingProviders.addAll(providers);
 		}
+	}
+	
+	public boolean equalsMappings(Set<IMappingProvider> other) {
+		if (other == mappingProviders)
+			return true;
+		if (other.size() != mappingProviders.size())
+			return false;
+		return mappingProviders.containsAll(other);
 	}
 
 	private void checkClassMappings() {
@@ -644,13 +652,11 @@ public class TinyRemapper {
 	}
 	
 	private void unmergeInput() {
-		for (ClassInstance node : classes.values()) {
-			if (node.isInput) {
-				node.parents.clear();
-			} else {
-				node.children.removeIf(child -> child.isInput);
-			}
-		}
+		classes.values().parallelStream()
+				.filter(node -> node.isInput)
+				.flatMap(node -> node.parents.stream())
+				.distinct()
+				.forEach(node -> node.children.removeIf(child -> child.isInput));
 	}
 
 	private void propagate() {
@@ -1107,6 +1113,10 @@ public class TinyRemapper {
 		private final List<Map.Entry<String, String> > tasks = new ArrayList<Map.Entry<String,String> >();
 	}
 
+	public boolean isMappingsDirty() {
+		return mappingsDirty;
+	}
+	
 	private final boolean check = false;
 
 	private final boolean keepInputData;
@@ -1138,7 +1148,7 @@ public class TinyRemapper {
 	final Map<MemberInstance, Set<String>> conflicts = new ConcurrentHashMap<>();
 	final Set<ClassInstance> classesToMakePublic = Collections.newSetFromMap(new ConcurrentHashMap<>());
 	final Set<MemberInstance> membersToMakePublic = Collections.newSetFromMap(new ConcurrentHashMap<>());
-	private final Collection<IMappingProvider> mappingProviders;
+	private Set<IMappingProvider> mappingProviders;
 	final boolean ignoreFieldDesc;
 	private final int threadCount;
 	private final ExecutorService threadPool;
