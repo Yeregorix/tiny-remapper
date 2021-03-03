@@ -33,7 +33,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class TinyRemapper {
@@ -124,7 +123,7 @@ public class TinyRemapper {
 		}
 
 		public Builder skipConflictsChecking(boolean value) {
-		skipConflictsChecking = value;
+			skipConflictsChecking = value;
 			return this;
 		}
 
@@ -246,21 +245,7 @@ public class TinyRemapper {
 	}
 
 	public CompletableFuture<List<ClassInstance>> readInputsAsync(byte[]... inputs) {
-		InputTag[] tags = singleInputTags.get().get(null);
-		List<CompletableFuture<ClassInstance>> futures = new ArrayList<>();
-		for (byte[] entry : inputs) {
-			futures.add(CompletableFuture.supplyAsync(() -> analyze(true, tags, "/", entry), threadPool));
-		}
-		dirty = true;
-		return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-				.thenApply(ignore -> futures.stream().map(CompletableFuture::join).collect(Collectors.toList()))
-				.whenComplete((res, throwable) -> {
-					if (res != null) {
-						for (ClassInstance node : res) {
-							addClass(node, readClasses);
-						}
-					}
-				});
+		return readClassAsync(true, inputs);
 	}
 
 	public CompletableFuture<?> readInputsAsync(Path... inputs) {
@@ -295,13 +280,42 @@ public class TinyRemapper {
 		return ret;
 	}
 
+	public void readClassPath(byte[]... inputs) {
+		readClassPathAsync(inputs).join();
+	}
+
+	private CompletableFuture<List<ClassInstance>> readClassPathAsync(byte[]... inputs) {
+		return readClassAsync(false, inputs);
+	}
+	
+	private CompletableFuture<List<ClassInstance>> readClassAsync(boolean isInput, byte[]... inputs) {
+		InputTag[] tags = singleInputTags.get().get(null);
+		List<CompletableFuture<ClassInstance>> futures = new ArrayList<>();
+		for (byte[] entry : inputs) {
+			futures.add(CompletableFuture.supplyAsync(() -> analyze(isInput, tags, "/", entry), threadPool));
+		}
+		dirty = true;
+		return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+				.thenApply(ignore -> futures.stream()
+						.map(CompletableFuture::join)
+						.filter(Objects::nonNull)
+						.collect(Collectors.toList()))
+				.whenComplete((res, throwable) -> {
+					if (res != null) {
+						for (ClassInstance node : res) {
+							addClass(node, readClasses);
+						}
+					}
+				});
+	}
+
 	private CompletableFuture<List<ClassInstance>> read(Path[] inputs, boolean isInput, InputTag tag) {
 		InputTag[] tags = singleInputTags.get().get(tag);
 		List<CompletableFuture<List<ClassInstance>>> futures = new ArrayList<>();
 		List<FileSystem> fsToClose = Collections.synchronizedList(new ArrayList<>());
 
 		for (Path input : inputs) {
-			futures.addAll(read(input, isInput, tags, true, fsToClose));
+			futures.add(read(input, isInput, tags, fsToClose, true));
 		}
 
 		CompletableFuture<List<ClassInstance>> ret;
@@ -360,76 +374,52 @@ public class TinyRemapper {
 		}
 	}
 
-	private List<CompletableFuture<List<ClassInstance>>> read(final Path file, boolean isInput, InputTag[] tags,
-			boolean saveData, final List<FileSystem> fsToClose) {
-		try {
-			return read(file, isInput, tags, file.toString(), saveData, fsToClose);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+	private CompletableFuture<List<ClassInstance>> read(final Path file, boolean isInput, InputTag[] tags, final List<FileSystem> fsToClose, boolean isParentLevel) {
+		return read(file, isInput, tags, file.toString(), fsToClose, isParentLevel);
 	}
 
-	private List<CompletableFuture<List<ClassInstance>>> read(final Path file, boolean isInput, InputTag[] tags, final String srcPath,
-			final boolean saveData, final List<FileSystem> fsToClose) throws IOException {
-		List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
-
-		Files.walkFileTree(file, new SimpleFileVisitor<Path>() {
-			@Override
-			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-				String name = file.getFileName().toString();
-
-				if (name.endsWith(".jar") ||
-						name.endsWith(".zip") ||
-						name.endsWith(".class")) {
-					ret.add(CompletableFuture.supplyAsync(new Supplier<List<ClassInstance>>() {
-						@Override
-						public List<ClassInstance> get() {
-							try {
-								return readFile(file, isInput, tags, srcPath, fsToClose);
-							} catch (URISyntaxException e) {
-								throw new RuntimeException(e);
-							} catch (IOException e) {
-								System.out.println(file.toAbsolutePath());
-								e.printStackTrace();
-								return Collections.emptyList();
-							}
-						}
-					}, threadPool));
-				}
-
-				return FileVisitResult.CONTINUE;
-			}
-		});
-
-		return ret;
-	}
-
-	private List<ClassInstance> readFile(Path file, boolean isInput, InputTag[] tags, final String srcPath,
-			List<FileSystem> fsToClose) throws IOException, URISyntaxException {
-		List<ClassInstance> ret = new ArrayList<ClassInstance>();
-
+	private CompletableFuture<List<ClassInstance>> read(Path file, boolean isInput, InputTag[] tags, final String srcPath, List<FileSystem> fsToClose, boolean isParentLevel) {
 		if (file.toString().endsWith(".class")) {
-			ClassInstance res = analyze(isInput, tags, srcPath, Files.readAllBytes(file));
-			if (res != null) ret.add(res);
-		} else {
-			URI uri = new URI("jar:"+file.toUri().toString());
-			FileSystem fs = FileSystemHandler.open(uri);
-			fsToClose.add(fs);
-
-			Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
-				@Override
-				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-					if (file.toString().endsWith(".class")) {
-						ClassInstance res = analyze(isInput, tags, srcPath, Files.readAllBytes(file));
-						if (res != null) ret.add(res);
-					}
-
-					return FileVisitResult.CONTINUE;
+			return CompletableFuture.supplyAsync(() -> {
+				try {
+					ClassInstance res = analyze(isInput, tags, srcPath, Files.readAllBytes(file));
+					if (res != null) return Collections.singletonList(res);
+				} catch (IOException e) {
+					System.out.println(file.toAbsolutePath());
+					e.printStackTrace();
 				}
-			});
+				return Collections.emptyList();
+			}, threadPool);
+		} else if (isParentLevel) {
+			try {
+				URI uri = new URI("jar:" + file.toUri().toString());
+				FileSystem fs = FileSystemHandler.open(uri);
+				fsToClose.add(fs);
+				List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
+				Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
+					@Override
+					public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+						if (file.toString().endsWith(".class")) {
+							ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
+						}
+						
+						return FileVisitResult.CONTINUE;
+					}
+				});
+				return CompletableFuture.allOf(ret.toArray(new CompletableFuture[0])).thenApply(unused ->
+						ret.stream()
+								.map(CompletableFuture::join)
+								.flatMap(Collection::stream)
+								.collect(Collectors.toList()));
+			} catch (URISyntaxException e) {
+				throw new RuntimeException(e);
+			} catch (IOException e) {
+				System.out.println(file.toAbsolutePath());
+				e.printStackTrace();
+			}
 		}
-
-		return ret;
+		
+		return CompletableFuture.completedFuture(Collections.emptyList());
 	}
 
 	private ClassInstance analyze(boolean isInput, InputTag[] tags, String srcPath, byte[] data) {
@@ -1130,8 +1120,8 @@ public class TinyRemapper {
 	private final boolean rebuildSourceFilenames;
 	private final boolean skipLocalMapping;
 	private final boolean renameInvalidLocals;
-    private final boolean skipConflictsChecking;
-    private final boolean cacheMappings;
+	private final boolean skipConflictsChecking;
+	private final boolean cacheMappings;
 	private final ClassVisitor extraAnalyzeVisitor;
 	final Remapper extraRemapper;
 
