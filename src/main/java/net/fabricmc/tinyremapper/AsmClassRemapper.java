@@ -95,7 +95,7 @@ class AsmClassRemapper extends ClassRemapper {
 		return createAsmAnnotationRemapper(descriptor, super.visitTypeAnnotation(typeRef, typePath, descriptor, visible), remapper);
 	}
 
-	public static AnnotationRemapper createAsmAnnotationRemapper(String desc, AnnotationVisitor annotationVisitor, Remapper remapper) {
+	public static AnnotationVisitor createAsmAnnotationRemapper(String desc, AnnotationVisitor annotationVisitor, Remapper remapper) {
 		return annotationVisitor == null ? null : new AsmAnnotationRemapper(annotationVisitor, remapper, desc);
 	}
 
@@ -585,9 +585,12 @@ class AsmClassRemapper extends ClassRemapper {
 		private final boolean renameInvalidLocals;
 	}
 
-	private static class AsmAnnotationRemapper extends AnnotationRemapper {
+	private static class AsmAnnotationRemapper extends AnnotationVisitor {
+		protected final Remapper remapper;
+
 		public AsmAnnotationRemapper(AnnotationVisitor annotationVisitor, Remapper remapper, String annotationDesc) {
-			super(annotationVisitor, remapper);
+			super(Opcodes.ASM9, annotationVisitor);
+			this.remapper = remapper;
 
 			annotationClass = Type.getType(annotationDesc).getInternalName();
 		}
