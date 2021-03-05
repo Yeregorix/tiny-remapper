@@ -209,9 +209,9 @@ class AsmRemapper extends Remapper {
 			}
 		}
 
-		System.out.printf("Invalid access from %s to %s after remapping.%n",
+		remapper.logger.accept(String.format("Invalid access from %s to %s after remapping.",
 				mappedAccessor,
-				inaccessible);
+				inaccessible));
 
 		if (!clsAccessible) remapper.classesToMakePublic.add(cls);
 		if (!memberAccessible) remapper.membersToMakePublic.add(member);

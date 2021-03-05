@@ -33,6 +33,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class TinyRemapper {
@@ -127,8 +128,18 @@ public class TinyRemapper {
 			return this;
 		}
 
+		public Builder skipPropagate(boolean value) {
+			skipPropagate = value;
+			return this;
+		}
+
 		public Builder cacheMappings(boolean value) {
 			cacheMappings = value;
+			return this;
+		}
+
+		public Builder logger(Consumer<String> value) {
+			logger = value;
 			return this;
 		}
 
@@ -138,7 +149,7 @@ public class TinyRemapper {
 					forcePropagation, propagatePrivate,
 					removeFrames, ignoreConflicts, resolveMissing, checkPackageAccess || fixPackageAccess, fixPackageAccess,
 					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, skipConflictsChecking,
-					cacheMappings, extraAnalyzeVisitor, extraRemapper);
+					cacheMappings, skipPropagate, extraAnalyzeVisitor, extraRemapper, logger);
 
 			return remapper;
 		}
@@ -159,8 +170,10 @@ public class TinyRemapper {
 		private boolean renameInvalidLocals = false;
 		private boolean skipConflictsChecking = false;
 		private boolean cacheMappings = false;
+		private boolean skipPropagate = false;
 		private ClassVisitor extraAnalyzeVisitor;
 		private Remapper extraRemapper;
+		private Consumer<String> logger = System.out::println;
 	}
 
 	private TinyRemapper(Set<IMappingProvider> mappingProviders, boolean ignoreFieldDesc,
@@ -177,7 +190,10 @@ public class TinyRemapper {
 			boolean renameInvalidLocals,
 			boolean skipConflictsChecking,
 			boolean cacheMappings,
-			ClassVisitor extraAnalyzeVisitor, Remapper extraRemapper) {
+			boolean skipPropagate,
+			ClassVisitor extraAnalyzeVisitor,
+			Remapper extraRemapper,
+			Consumer<String> logger) {
 		this.mappingProviders = mappingProviders;
 		this.ignoreFieldDesc = ignoreFieldDesc;
 		this.threadCount = threadCount > 0 ? threadCount : Math.max(Runtime.getRuntime().availableProcessors(), 2);
@@ -195,8 +211,10 @@ public class TinyRemapper {
 		this.renameInvalidLocals = renameInvalidLocals;
 		this.skipConflictsChecking = skipConflictsChecking;
 		this.cacheMappings = cacheMappings;
+		this.skipPropagate = skipPropagate;
 		this.extraAnalyzeVisitor = extraAnalyzeVisitor;
 		this.extraRemapper = extraRemapper;
+		this.logger = logger;
 	}
 
 	public static Builder newRemapper() {
@@ -348,7 +366,7 @@ public class TinyRemapper {
 		});
 	}
 
-	private static void addClass(ClassInstance cls, Map<String, ClassInstance> out) {
+	private void addClass(ClassInstance cls, Map<String, ClassInstance> out) {
 		String name = cls.getName();
 
 		// add new class or replace non-input class with input class, warn if two input classes clash
@@ -358,7 +376,7 @@ public class TinyRemapper {
 
 			if (cls.isInput) {
 				if (prev.isInput) {
-					System.out.printf("duplicate input class %s, from %s and %s%n", name, prev.srcPath, cls.srcPath);
+					logger.accept(String.format("duplicate input class %s, from %s and %s", name, prev.srcPath, cls.srcPath));
 					prev.addInputTags(cls.getInputTags());
 					return;
 				} else if (out.replace(name, prev, cls)) { // cas with retry-loop on failure
@@ -368,6 +386,11 @@ public class TinyRemapper {
 					// loop
 				}
 			} else {
+				if (out == readClasses) {
+					mergedClasspath = false;
+					mappingsDirty = true;
+				}
+
 				prev.addInputTags(cls.getInputTags());
 				return;
 			}
@@ -385,7 +408,7 @@ public class TinyRemapper {
 					ClassInstance res = analyze(isInput, tags, srcPath, Files.readAllBytes(file));
 					if (res != null) return Collections.singletonList(res);
 				} catch (IOException e) {
-					System.out.println(file.toAbsolutePath());
+					logger.accept(file.toAbsolutePath().toString());
 					e.printStackTrace();
 				}
 				return Collections.emptyList();
@@ -414,7 +437,7 @@ public class TinyRemapper {
 			} catch (URISyntaxException e) {
 				throw new RuntimeException(e);
 			} catch (IOException e) {
-				System.out.println(file.toAbsolutePath());
+				logger.accept(file.toAbsolutePath().toString());
 				e.printStackTrace();
 			}
 		}
@@ -461,20 +484,16 @@ public class TinyRemapper {
 	}
 
 	private void loadMappings(boolean ignoreCached) {
-	    if (ignoreCached) {
+	    if (mappingsDirty || ignoreCached) {
             classMap.clear();
             methodMap.clear();
             methodArgMap.clear();
             fieldMap.clear();
-		
-		    for (ClassInstance node : classes.values()) {
-			    node.parents.clear();
-			    node.children.clear();
-		    }
+		    unmergeClasses();
             
             mappingsDirty = true;
         }
-	    
+
 	    if (!mappingsDirty) return;
 		mappingsDirty = false;
 		MappingAcceptor acceptor = new MappingAcceptor() {
@@ -537,8 +556,6 @@ public class TinyRemapper {
 		}
 
 		checkClassMappings();
-		mergeClasspath();
-		propagate();
 	}
 	
 	public void replaceMappings(Set<IMappingProvider> providers) {
@@ -569,11 +586,12 @@ public class TinyRemapper {
 					duplicates.add(name);
 				}
 			}
-
-			System.out.println("non-unique class target name mappings:");
+			
+			logger.accept("non-unique class target name mappings:");
 
 			for (String target : duplicates) {
-				System.out.print("  [");
+				StringBuilder builder = new StringBuilder();
+				builder.append("  [");
 				boolean first = true;
 
 				for (Map.Entry<String, String> e : classMap.entrySet()) {
@@ -581,23 +599,34 @@ public class TinyRemapper {
 						if (first) {
 							first = false;
 						} else {
-							System.out.print(", ");
+							builder.append(", ");
 						}
-
-						System.out.print(e.getKey());
+						
+						builder.append(e.getKey());
 					}
 				}
-
-				System.out.printf("] -> %s%n", target);
+				
+				builder.append("] -> ").append(target);
+				logger.accept(builder.toString());
 			}
 
 			throw new RuntimeException("duplicate class target name mappings detected");
 		}
 	}
+	
+	private void unmergeClasses() {
+		mergedClasspath = false;
+		for (ClassInstance node : classes.values()) {
+			node.parents.clear();
+			node.children.clear();
+		}
+	}
 
 	private void mergeClasspath() {
+		if (mergedClasspath) return;
+		mergedClasspath = true;
 		for (ClassInstance node : classes.values()) {
-			if (node.isInput) return;
+			if (node.isInput) continue;
 			assert node.getSuperName() != null;
 
 			ClassInstance parent = classes.get(node.getSuperName());
@@ -619,8 +648,9 @@ public class TinyRemapper {
 	}
 
 	private void mergeInput() {
-		for (ClassInstance node : classes.values()) {
-			if (!node.isInput) return;
+		for (ClassInstance node : classes.values().parallelStream()
+				.filter(node -> node.isInput)
+				.collect(Collectors.toList())) {
 			assert node.getSuperName() != null;
 			
 			ClassInstance parent = classes.get(node.getSuperName());
@@ -650,6 +680,16 @@ public class TinyRemapper {
 	}
 
 	private void propagate() {
+		if (skipPropagate) return;
+		conflicts.clear();
+		classes.values().parallelStream().forEach(value -> {
+			value.resolvedMembers = new ConcurrentHashMap<>();
+			for (MemberInstance member : value.getMembers()) {
+				member.forceSetNewName(null);
+				member.newNameOriginatingCls = null;
+			}
+		});
+
 		List<Future<?>> futures = new ArrayList<>();
 		List<Map.Entry<String, String>> tasks = new ArrayList<>();
 		int maxTasks = methodMap.size() / threadCount / 4;
@@ -699,7 +739,7 @@ public class TinyRemapper {
 			if (testSet.size() != cls.getMembers().size()) {
 				if (!targetNameCheckFailed) {
 					targetNameCheckFailed = true;
-					System.out.println("Mapping target name conflicts detected:");
+					logger.accept("Mapping target name conflicts detected:");
 				}
 
 				Map<String, List<MemberInstance>> duplicates = new HashMap<>();
@@ -717,22 +757,25 @@ public class TinyRemapper {
 					if (members.size() < 2) continue;
 
 					MemberInstance anyMember = members.get(0);
-					System.out.printf("  %ss %s/[", anyMember.type, cls.getName());
+					StringBuilder builder = new StringBuilder();
+					builder.append("  ").append(anyMember.type).append("s ").append(cls.getName()).append("/[");
 
 					for (int i = 0; i < members.size(); i++) {
-						if (i != 0) System.out.print(", ");
+						if (i != 0) builder.append(", ");
 
 						MemberInstance member = members.get(i);
 
 						if (member.newNameOriginatingCls != null && !member.newNameOriginatingCls.equals(cls.getName())) {
-							System.out.print(member.newNameOriginatingCls);
-							System.out.print('/');
+							builder.append(member.newNameOriginatingCls);
+							builder.append('/');
 						}
-
-						System.out.print(member.name);
+						
+						builder.append(member.name);
 					}
-
-					System.out.printf("]%s -> %s%n", MemberInstance.getId(anyMember.type, "", anyMember.desc, ignoreFieldDesc), MemberInstance.getNameFromId(anyMember.type, nameDesc, ignoreFieldDesc));
+					
+					builder.append(']').append(MemberInstance.getId(anyMember.type, "", anyMember.desc, ignoreFieldDesc));
+					builder.append(" -> ").append(MemberInstance.getNameFromId(anyMember.type, nameDesc, ignoreFieldDesc));
+					logger.accept(builder.toString());
 				}
 			}
 
@@ -742,7 +785,7 @@ public class TinyRemapper {
 		boolean unfixableConflicts = false;
 
 		if (!conflicts.isEmpty()) {
-			System.out.println("Mapping source name conflicts detected:");
+			logger.accept("Mapping source name conflicts detected:");
 
 			for (Map.Entry<MemberInstance, Set<String>> entry : conflicts.entrySet()) {
 				MemberInstance member = entry.getKey();
@@ -750,7 +793,7 @@ public class TinyRemapper {
 				Set<String> names = entry.getValue();
 				names.add(member.cls.getName()+"/"+newName);
 
-				System.out.printf("  %s %s %s (%s) -> %s%n", member.cls.getName(), member.type.name(), member.name, member.desc, names);
+				logger.accept(String.format("  %s %s %s (%s) -> %s", member.cls.getName(), member.type.name(), member.name, member.desc, names));
 
 				if (ignoreConflicts) {
 					Map<String, String> mappings = member.type == MemberType.METHOD ? methodMap : fieldMap;
@@ -772,14 +815,14 @@ public class TinyRemapper {
 						unfixableConflicts = true;
 					} else {
 						member.forceSetNewName(mappingName);
-						System.out.println("    fixable: replaced with "+mappingName);
+						logger.accept("    fixable: replaced with "+mappingName);
 					}
 				}
 			}
 		}
 
 		if (!conflicts.isEmpty() && !ignoreConflicts || unfixableConflicts || targetNameCheckFailed) {
-			if (ignoreConflicts || targetNameCheckFailed) System.out.println("There were unfixable conflicts.");
+			if (ignoreConflicts || targetNameCheckFailed) logger.accept("There were unfixable conflicts.");
 
 			System.exit(1);
 		}
@@ -828,7 +871,7 @@ public class TinyRemapper {
 
 				if (fixPackageAccess) {
 					if (needsFixes) {
-						System.out.printf("Fixing access for %d classes and %d members.%n", classesToMakePublic.size(), membersToMakePublic.size());
+						logger.accept(String.format("Fixing access for %d classes and %d members.", classesToMakePublic.size(), membersToMakePublic.size()));
 					}
 
 					for (Map.Entry<ClassInstance, byte[]> entry : outputBuffer.entrySet()) {
@@ -912,7 +955,9 @@ public class TinyRemapper {
 
 		_prepareClasses();
 		loadMappings(!cacheMappings);
+		mergeClasspath();
 		mergeInput();
+		propagate();
 
 		assert dirty;
 		dirty = false;
@@ -1122,8 +1167,10 @@ public class TinyRemapper {
 	private final boolean renameInvalidLocals;
 	private final boolean skipConflictsChecking;
 	private final boolean cacheMappings;
+	private final boolean skipPropagate;
 	private final ClassVisitor extraAnalyzeVisitor;
 	final Remapper extraRemapper;
+	final Consumer<String> logger;
 
 	final AtomicReference<Map<InputTag, InputTag[]>> singleInputTags = new AtomicReference<>(Collections.emptyMap()); // cache for tag -> { tag }
 
@@ -1144,6 +1191,7 @@ public class TinyRemapper {
 	private final ExecutorService threadPool;
 	private final AsmRemapper remapper = new AsmRemapper(this);
 
+	private boolean mergedClasspath = false;
 	private boolean mappingsDirty = true;
 	private volatile boolean dirty = true; // volatile to make the state debug asserts more reliable, shouldn't actually see concurrent modifications
 	private Map<ClassInstance, byte[]> outputBuffer;

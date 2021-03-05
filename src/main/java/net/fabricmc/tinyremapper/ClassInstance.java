@@ -455,7 +455,7 @@ public final class ClassInstance {
 	final String srcPath;
 	byte[] data;
 	private final Map<String, MemberInstance> members = new HashMap<>(); // methods and fields are distinct due to their different desc separators
-	private final ConcurrentMap<String, MemberInstance> resolvedMembers = new ConcurrentHashMap<>();
+	ConcurrentMap<String, MemberInstance> resolvedMembers = new ConcurrentHashMap<>();
 	final Set<ClassInstance> parents = new HashSet<>();
 	final Set<ClassInstance> children = new HashSet<>();
 	private String name;
