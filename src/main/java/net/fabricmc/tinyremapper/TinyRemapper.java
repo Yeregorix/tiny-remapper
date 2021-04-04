@@ -414,28 +414,43 @@ public class TinyRemapper {
 				return Collections.emptyList();
 			}, threadPool);
 		} else if (isParentLevel) {
+			List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
 			try {
-				URI uri = new URI("jar:" + file.toUri().toString());
-				FileSystem fs = FileSystemHandler.open(uri);
-				fsToClose.add(fs);
-				List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
-				Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
-					@Override
-					public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-						if (file.toString().endsWith(".class")) {
-							ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
+				if (Files.isDirectory(file)) {
+					Files.walkFileTree(file, new SimpleFileVisitor<Path>() {
+						@Override
+						public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+							if (file.toString().endsWith(".class")) {
+								ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
+							}
+							
+							return FileVisitResult.CONTINUE;
 						}
-						
-						return FileVisitResult.CONTINUE;
+					});
+				} else {
+					try {
+						URI uri = new URI("jar:" + file.toUri().toString());
+						FileSystem fs = FileSystemHandler.open(uri);
+						fsToClose.add(fs);
+						Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
+							@Override
+							public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+								if (file.toString().endsWith(".class")) {
+									ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
+								}
+								
+								return FileVisitResult.CONTINUE;
+							}
+						});
+					} catch (URISyntaxException e) {
+						throw new RuntimeException(e);
 					}
-				});
+				}
 				return CompletableFuture.allOf(ret.toArray(new CompletableFuture[0])).thenApply(unused ->
 						ret.stream()
 								.map(CompletableFuture::join)
 								.flatMap(Collection::stream)
 								.collect(Collectors.toList()));
-			} catch (URISyntaxException e) {
-				throw new RuntimeException(e);
 			} catch (IOException e) {
 				logger.accept(file.toAbsolutePath().toString());
 				e.printStackTrace();
