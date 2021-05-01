@@ -8,12 +8,11 @@ plugins {
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
-version = '0.3.2-architectury.7'
+version = '1.0.0'
 
 def ENV = System.getenv()
-version = version + (ENV.GITHUB_ACTIONS ? "" : "+local")
 
-group = 'net.fabricmc'
+group = 'dev.architectury'
 archivesBaseName = 'tiny-remapper'
 
 repositories {
@@ -21,10 +20,10 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.ow2.asm:asm:9.0'
-	implementation 'org.ow2.asm:asm-commons:9.0'
-	implementation 'org.ow2.asm:asm-tree:9.0'
-	implementation 'org.ow2.asm:asm-util:9.0'
+	implementation 'org.ow2.asm:asm:9.1'
+	implementation 'org.ow2.asm:asm-commons:9.1'
+	implementation 'org.ow2.asm:asm-tree:9.1'
+	implementation 'org.ow2.asm:asm-util:9.1'
 }
 
 java {
@@ -45,21 +44,24 @@ license {
 }
 
 shadowJar {
-	archiveClassifier = 'fat'
+	relocate 'net.fabricmc.tinyremapper', 'dev.architectury.tinyremapper'
+	classifier null
+	configurations = []
 }
 
 jar {
 	manifest {
 		attributes	'Implementation-Title': 'TinyRemapper',
 					'Implementation-Version': archiveVersion,
-					'Main-Class': "net.fabricmc.tinyremapper.Main"
+					'Main-Class': "dev.architectury.tinyremapper.Main"
 	}
+	classifier 'raw'
 }
 
 publishing {
 	publications {
 		mavenJava(MavenPublication) {
-			from components.java
+			artifact shadowJar
 		}
 	}
 
