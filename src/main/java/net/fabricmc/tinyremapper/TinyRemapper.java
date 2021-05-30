@@ -416,9 +416,12 @@ public class TinyRemapper {
 					ClassInstance res = analyze(isInput, tags, srcPath, Files.readAllBytes(file));
 					if (res != null) return Collections.singletonList(res);
 				} catch (IOException e) {
-					logger.accept(file.toAbsolutePath().toString());
+                    logger.accept("Failed to read " + file.toAbsolutePath());
 					e.printStackTrace();
-				}
+				} catch (Throwable throwable) {
+				    logger.accept("Failed to read " + file.toAbsolutePath());
+				    throw throwable;
+                }
 				return Collections.emptyList();
 			}, threadPool);
 		} else if (isParentLevel) {
@@ -437,7 +440,7 @@ public class TinyRemapper {
 					});
 				} else {
 					try {
-						URI uri = new URI("jar:" + file.toUri().toString());
+						URI uri = new URI("jar:" + file.toUri());
 						FileSystem fs = FileSystemHandler.open(uri);
 						fsToClose.add(fs);
 						Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
