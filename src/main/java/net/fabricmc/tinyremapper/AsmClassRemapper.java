@@ -172,7 +172,7 @@ class AsmClassRemapper extends ClassRemapper {
 
 		@Override
 		public void visitInvokeDynamicInsn(String name, String descriptor, Handle bootstrapMethodHandle, Object... bootstrapMethodArguments) {
-			Handle implemented = getLambdaImplementedMethod(name, descriptor, bootstrapMethodHandle, bootstrapMethodArguments);
+			Handle implemented = getLambdaImplementedMethod((AsmRemapper) remapper, name, descriptor, bootstrapMethodHandle, bootstrapMethodArguments);
 
 			if (implemented != null) {
 				name = remapper.mapMethodName(implemented.getOwner(), implemented.getName(), implemented.getDesc());
@@ -190,12 +190,14 @@ class AsmClassRemapper extends ClassRemapper {
 					bootstrapMethodArguments);
 		}
 
-		private static Handle getLambdaImplementedMethod(String name, String desc, Handle bsm, Object... bsmArgs) {
+		private static Handle getLambdaImplementedMethod(AsmRemapper remapper, String name, String desc, Handle bsm, Object... bsmArgs) {
 			if (isJavaLambdaMetafactory(bsm)) {
 				assert desc.endsWith(";");
 				return new Handle(Opcodes.H_INVOKEINTERFACE, desc.substring(desc.lastIndexOf(')') + 2, desc.length() - 1), name, ((Type) bsmArgs[0]).getDescriptor(), true);
 			} else {
-				System.out.printf("unknown invokedynamic bsm: %s/%s%s (tag=%d iif=%b)%n", bsm.getOwner(), bsm.getName(), bsm.getDesc(), bsm.getTag(), bsm.isInterface());
+				if (remapper.remapper.logUnknownInvokeDynamic) {
+					remapper.remapper.logger.accept(String.format("unknown invokedynamic bsm: %s/%s%s (tag=%d iif=%b)%n", bsm.getOwner(), bsm.getName(), bsm.getDesc(), bsm.getTag(), bsm.isInterface()));
+				}
 
 				return null;
 			}

@@ -242,5 +242,5 @@ class AsmRemapper extends Remapper {
 		return remapper.classes.get(owner);
 	}
 
-	private final TinyRemapper remapper;
+	final TinyRemapper remapper;
 }

@@ -132,6 +132,11 @@ public class TinyRemapper {
 			skipPropagate = value;
 			return this;
 		}
+		
+		public Builder logUnknownInvokeDynamic(boolean value) {
+			logUnknownInvokeDynamic = value;
+			return this;
+		}
 
 		public Builder cacheMappings(boolean value) {
 			cacheMappings = value;
@@ -149,7 +154,7 @@ public class TinyRemapper {
 					forcePropagation, propagatePrivate,
 					removeFrames, ignoreConflicts, resolveMissing, checkPackageAccess || fixPackageAccess, fixPackageAccess,
 					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, skipConflictsChecking,
-					cacheMappings, skipPropagate, extraAnalyzeVisitor, extraRemapper, logger);
+					cacheMappings, skipPropagate, logUnknownInvokeDynamic, extraAnalyzeVisitor, extraRemapper, logger);
 
 			return remapper;
 		}
@@ -171,6 +176,7 @@ public class TinyRemapper {
 		private boolean skipConflictsChecking = false;
 		private boolean cacheMappings = false;
 		private boolean skipPropagate = false;
+		private boolean logUnknownInvokeDynamic = true;
 		private ClassVisitor extraAnalyzeVisitor;
 		private Remapper extraRemapper;
 		private Consumer<String> logger = System.out::println;
@@ -191,6 +197,7 @@ public class TinyRemapper {
 			boolean skipConflictsChecking,
 			boolean cacheMappings,
 			boolean skipPropagate,
+			boolean logUnknownInvokeDynamic,
 			ClassVisitor extraAnalyzeVisitor,
 			Remapper extraRemapper,
 			Consumer<String> logger) {
@@ -212,6 +219,7 @@ public class TinyRemapper {
 		this.skipConflictsChecking = skipConflictsChecking;
 		this.cacheMappings = cacheMappings;
 		this.skipPropagate = skipPropagate;
+		this.logUnknownInvokeDynamic = logUnknownInvokeDynamic;
 		this.extraAnalyzeVisitor = extraAnalyzeVisitor;
 		this.extraRemapper = extraRemapper;
 		this.logger = logger;
@@ -1183,6 +1191,7 @@ public class TinyRemapper {
 	private final boolean skipConflictsChecking;
 	private final boolean cacheMappings;
 	private final boolean skipPropagate;
+	final boolean logUnknownInvokeDynamic;
 	private final ClassVisitor extraAnalyzeVisitor;
 	final Remapper extraRemapper;
 	final Consumer<String> logger;
