@@ -1,14 +1,14 @@
 plugins {
 	id 'java'
 	id 'maven-publish'
-	id 'org.cadixdev.licenser' version '0.5.0'
+	id 'checkstyle'
 	id 'com.github.johnrengelman.shadow' version '6.1.0'
 }
 
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
-version = '1.1.0'
+version = '1.2.0'
 
 def ENV = System.getenv()
 
@@ -24,6 +24,8 @@ dependencies {
 	implementation 'org.ow2.asm:asm-commons:9.1'
 	implementation 'org.ow2.asm:asm-tree:9.1'
 	implementation 'org.ow2.asm:asm-util:9.1'
+
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.6.2'
 }
 
 java {
@@ -38,15 +40,19 @@ tasks.withType(JavaCompile).configureEach {
 	}
 }
 
-license {
-	header file("HEADER")
-	include '**/*.java'
-}
-
 shadowJar {
 	relocate 'net.fabricmc.tinyremapper', 'dev.architectury.tinyremapper'
 	classifier null
 	configurations = []
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		showStandardStreams = true
+		exceptionFormat = 'full'
+		events = ['passed', 'failed', 'skipped']
+	}
 }
 
 jar {
@@ -56,6 +62,11 @@ jar {
 					'Main-Class': "dev.architectury.tinyremapper.Main"
 	}
 	classifier 'raw'
+}
+
+checkstyle {
+	configFile = file("checkstyle.xml")
+	toolVersion = '8.31'
 }
 
 publishing {

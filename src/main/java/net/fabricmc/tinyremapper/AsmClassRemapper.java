@@ -28,12 +28,12 @@ import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.Handle;
+import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.TypePath;
 import org.objectweb.asm.commons.AnnotationRemapper;
-import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.FieldRemapper;
 import org.objectweb.asm.commons.MethodRemapper;
 import org.objectweb.asm.commons.Remapper;
@@ -45,29 +45,70 @@ import org.objectweb.asm.tree.ParameterNode;
 
 import net.fabricmc.tinyremapper.MemberInstance.MemberType;
 
-class AsmClassRemapper extends ClassRemapper {
-	public AsmClassRemapper(ClassVisitor cv, AsmRemapper remapper, boolean checkPackageAccess, boolean skipLocalMapping, boolean renameInvalidLocals) {
+final class AsmClassRemapper extends VisitTrackingClassRemapper {
+	AsmClassRemapper(ClassVisitor cv, AsmRemapper remapper, boolean rebuildSourceFilenames, boolean checkPackageAccess, boolean skipLocalMapping, boolean renameInvalidLocals) {
 		super(cv, remapper);
 
+		this.rebuildSourceFilenames = rebuildSourceFilenames;
 		this.checkPackageAccess = checkPackageAccess;
 		this.skipLocalMapping = skipLocalMapping;
 		this.renameInvalidLocals = renameInvalidLocals;
 	}
 
 	@Override
+	public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+		if (checkPackageAccess) {
+			AsmRemapper remapper = (AsmRemapper) this.remapper;
+
+			if (superName != null) PackageAccessChecker.checkClass(name, superName, "super class", remapper);
+
+			if (interfaces != null) {
+				for (String iface : interfaces) {
+					PackageAccessChecker.checkClass(name, iface, "super interface", remapper);
+				}
+			}
+		}
+
+		sourceNameVisited = false;
+
+		super.visit(version, access, name, signature, superName, interfaces);
+	}
+
+	@Override
 	public void visitSource(String source, String debug) {
+		sourceNameVisited = true;
+
+		if (!rebuildSourceFilenames) {
+			super.visitSource(source, debug);
+			return;
+		}
+
 		String mappedClsName = remapper.map(className);
 		// strip inner classes
 		int end = mappedClsName.indexOf('$');
 		if (end <= 0) end = mappedClsName.length(); // require at least 1 character for the outer class
 		// strip package
 		int start = mappedClsName.lastIndexOf('/', end - 1) + 1; // avoid searching after $ to support weird nested class names like a$b/c
+		if (end <= start) end = mappedClsName.length();
 
 		super.visitSource(mappedClsName.substring(start, end).concat(".java"), debug);
 	}
 
 	@Override
+	public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
+		if (checkPackageAccess) {
+			PackageAccessChecker.checkDesc(className, descriptor, "field descriptor", (AsmRemapper) remapper);
+		}
+
+		return super.visitField(access, name, descriptor, signature, value);
+	}
+
+	@Override
 	public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+		if (checkPackageAccess) {
+			PackageAccessChecker.checkDesc(className, descriptor, "method descriptor", (AsmRemapper) remapper);
+		}
+
 		if (!skipLocalMapping || renameInvalidLocals) {
 			methodNode = new MethodNode(api, access, name, descriptor, signature, exceptions);
 		}
@@ -96,16 +137,32 @@ class AsmClassRemapper extends ClassRemapper {
 	}
 
 	public static AnnotationVisitor createAsmAnnotationRemapper(String desc, AnnotationVisitor annotationVisitor, Remapper remapper) {
-		return annotationVisitor == null ? null : new AsmAnnotationRemapper(annotationVisitor, remapper, desc);
+		return annotationVisitor == null ? null : new AsmAnnotationRemapper(desc, annotationVisitor, remapper, desc);
 	}
 
+	@Override
+	public void visitEnd() {
+		((AsmRemapper) remapper).finish(className, cv);
+
+		super.visitEnd();
+	}
+
+	@Override
+	protected void onVisit(VisitKind kind) {
+		if (rebuildSourceFilenames && !sourceNameVisited && kind.ordinal() > VisitKind.SOURCE.ordinal()) {
+			visitSource(null, null);
+		}
+	}
+
+	private final boolean rebuildSourceFilenames;
 	private final boolean checkPackageAccess;
 	private final boolean skipLocalMapping;
 	private final boolean renameInvalidLocals;
+	private boolean sourceNameVisited;
 	private MethodNode methodNode;
 
 	private static class AsmFieldRemapper extends FieldRemapper {
-		public AsmFieldRemapper(FieldVisitor fieldVisitor, Remapper remapper) {
+		AsmFieldRemapper(FieldVisitor fieldVisitor, Remapper remapper) {
 			super(fieldVisitor, remapper);
 		}
 
@@ -121,7 +178,7 @@ class AsmClassRemapper extends ClassRemapper {
 	}
 
 	private static class AsmMethodRemapper extends MethodRemapper {
-		public AsmMethodRemapper(MethodVisitor methodVisitor, Remapper remapper, String owner, MethodNode methodNode, boolean checkPackageAccess, boolean skipLocalMapping, boolean renameInvalidLocals) {
+		AsmMethodRemapper(MethodVisitor methodVisitor, Remapper remapper, String owner, MethodNode methodNode, boolean checkPackageAccess, boolean skipLocalMapping, boolean renameInvalidLocals) {
 			super(methodNode != null ? methodNode : methodVisitor, remapper);
 
 			this.owner = owner;
@@ -153,9 +210,45 @@ class AsmClassRemapper extends ClassRemapper {
 		}
 
 		@Override
+		public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
+			if (checkPackageAccess) {
+				PackageAccessChecker.checkClass(this.owner, type, "try-catch", (AsmRemapper) remapper);
+			}
+
+			super.visitTryCatchBlock(start, end, handler, type);
+		}
+
+		@Override
+		public void visitTypeInsn(int opcode, String type) {
+			if (checkPackageAccess) {
+				PackageAccessChecker.checkClass(this.owner, type, "type instruction", (AsmRemapper) remapper);
+			}
+
+			super.visitTypeInsn(opcode, type);
+		}
+
+		@Override
+		public void visitLdcInsn(Object value) {
+			if (checkPackageAccess) {
+				PackageAccessChecker.checkValue(this.owner, value, "ldc instruction", (AsmRemapper) remapper);
+			}
+
+			super.visitLdcInsn(value);
+		}
+
+		@Override
+		public void visitMultiANewArrayInsn(String descriptor, int numDimensions) {
+			if (checkPackageAccess) {
+				PackageAccessChecker.checkDesc(this.owner, descriptor, "multianewarray instruction", (AsmRemapper) remapper);
+			}
+
+			super.visitMultiANewArrayInsn(descriptor, numDimensions);
+		}
+
+		@Override
 		public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
 			if (checkPackageAccess) {
-				((AsmRemapper) remapper).checkPackageAccess(this.owner, owner, name, descriptor, MemberType.FIELD);
+				PackageAccessChecker.checkMember(this.owner, owner, name, descriptor, MemberType.FIELD, "field instruction", (AsmRemapper) remapper);
 			}
 
 			super.visitFieldInsn(opcode, owner, name, descriptor);
@@ -164,7 +257,7 @@ class AsmClassRemapper extends ClassRemapper {
 		@Override
 		public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
 			if (checkPackageAccess) {
-				((AsmRemapper) remapper).checkPackageAccess(this.owner, owner, name, descriptor, MemberType.METHOD);
+				PackageAccessChecker.checkMember(this.owner, owner, name, descriptor, MemberType.METHOD, "method instruction", (AsmRemapper) remapper);
 			}
 
 			super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
@@ -184,8 +277,8 @@ class AsmClassRemapper extends ClassRemapper {
 				bootstrapMethodArguments[i] = remapper.mapValue(bootstrapMethodArguments[i]);
 			}
 
-			mv.visitInvokeDynamicInsn( // bypass remapper
-					name,
+			// bypass remapper
+			mv.visitInvokeDynamicInsn(name,
 					remapper.mapMethodDesc(descriptor), (Handle) remapper.mapValue(bootstrapMethodHandle),
 					bootstrapMethodArguments);
 		}
@@ -194,6 +287,9 @@ class AsmClassRemapper extends ClassRemapper {
 			if (isJavaLambdaMetafactory(bsm)) {
 				assert desc.endsWith(";");
 				return new Handle(Opcodes.H_INVOKEINTERFACE, desc.substring(desc.lastIndexOf(')') + 2, desc.length() - 1), name, ((Type) bsmArgs[0]).getDescriptor(), true);
+			} else if (bsm.getOwner().equals("java/lang/invoke/StringConcatFactory")
+					|| bsm.getOwner().equals("java/lang/runtime/ObjectMethods")) {
+				return null;
 			} else {
 				if (remapper.remapper.logUnknownInvokeDynamic) {
 					remapper.remapper.logger.accept(String.format("unknown invokedynamic bsm: %s/%s%s (tag=%d iif=%b)%n", bsm.getOwner(), bsm.getName(), bsm.getDesc(), bsm.getTag(), bsm.isInterface()));
@@ -302,17 +398,19 @@ class AsmClassRemapper extends ClassRemapper {
 			}
 
 			boolean hasAnyArgs = false;
+			boolean hasAllArgs = true;
 
 			for (String arg : args) {
 				if (arg != null) {
 					hasAnyArgs = true;
-					break;
+				} else {
+					hasAllArgs = false;
 				}
 			}
 
 			// update lvs, fix vars
 			if (methodNode.localVariables != null
-					|| methodNode.parameters == null && (methodNode.access & Opcodes.ACC_ABSTRACT) == 0 && hasAnyArgs) { // avoid creating parameters if possible (non-abstract), create lvs instead
+					|| hasAnyArgs && (methodNode.access & Opcodes.ACC_ABSTRACT) == 0) { // no lvt without method body
 				if (methodNode.localVariables == null) {
 					methodNode.localVariables = new ArrayList<>();
 				}
@@ -378,7 +476,8 @@ class AsmClassRemapper extends ClassRemapper {
 
 			// update parameters
 			if (methodNode.parameters != null
-					|| (methodNode.access & Opcodes.ACC_ABSTRACT) != 0 && hasAnyArgs) {
+					|| hasAllArgs && args.length > 0 // avoid creating MethodParameters attribute with missing names since they trigger a Kotlin compiler bug
+					|| hasAnyArgs && (methodNode.access & Opcodes.ACC_ABSTRACT) != 0) { // .. unless parameters are the only way to specify args (no method body)
 				if (methodNode.parameters == null) {
 					methodNode.parameters = new ArrayList<>(args.length);
 				}
@@ -516,9 +615,10 @@ class AsmClassRemapper extends ClassRemapper {
 				 * other variable which already has that name, e.g.:
 				 * (MyClass ?, MyClass2 ?, MyClass ?) -> (MyClass myClass, MyClass2 myClass2, !myClass2 is already taken!)
 				 */
-				for (;nameCounts.putIfAbsent(varName, 1) != null; count++) {
-					varName = baseVarName + Integer.toString(count);
+				while (nameCounts.putIfAbsent(varName, 1) != null) {
+					varName = baseVarName + Integer.toString(count++);
 				}
+
 				nameCounts.put(baseVarName, count); // update name count
 
 				return varName;
@@ -590,7 +690,7 @@ class AsmClassRemapper extends ClassRemapper {
 	private static class AsmAnnotationRemapper extends AnnotationVisitor {
 		protected final Remapper remapper;
 
-		public AsmAnnotationRemapper(AnnotationVisitor annotationVisitor, Remapper remapper, String annotationDesc) {
+		public AsmAnnotationRemapper(String descriptor, AnnotationVisitor annotationVisitor, Remapper remapper, String annotationDesc) {
 			super(Opcodes.ASM9, annotationVisitor);
 			this.remapper = remapper;
 
