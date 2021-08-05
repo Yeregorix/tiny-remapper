@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2016, 2018, Player, asie
+ * Copyright (c) 2021, FabricMC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package net.fabricmc.tinyremapper;
 
 import java.util.Locale;
@@ -6,7 +24,8 @@ import org.objectweb.asm.ConstantDynamic;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Type;
 
-import net.fabricmc.tinyremapper.MemberInstance.MemberType;
+import net.fabricmc.tinyremapper.api.TrMember.MemberType;
+import net.fabricmc.tinyremapper.api.TrMember;
 
 public final class PackageAccessChecker {
 	/**
@@ -47,7 +66,7 @@ public final class PackageAccessChecker {
 				mappedAccessor,
 				mappedTarget);
 
-		remapper.remapper.classesToMakePublic.add(targetCls);
+		remapper.tr.classesToMakePublic.add(targetCls);
 	}
 
 	/**
@@ -76,7 +95,7 @@ public final class PackageAccessChecker {
 			checkDesc(accessingClass, ((Type) value).getDescriptor(), source, remapper);
 		} else if (value instanceof Handle) {
 			Handle handle = (Handle) value;
-			checkMember(accessingClass, handle.getOwner(), handle.getName(), handle.getDesc(), MemberType.METHOD, source, remapper);
+			checkMember(accessingClass, handle.getOwner(), handle.getName(), handle.getDesc(), TrMember.MemberType.METHOD, source, remapper);
 		} else if (value instanceof ConstantDynamic) {
 			ConstantDynamic constantDynamic = (ConstantDynamic) value;
 
@@ -99,7 +118,7 @@ public final class PackageAccessChecker {
 		if (cls == null) return;
 		cls = cls.getMrjOrigin();
 
-		String id = MemberInstance.getId(type, name, desc, remapper.remapper.ignoreFieldDesc);
+		String id = MemberInstance.getId(type, name, desc, remapper.tr.ignoreFieldDesc);
 		MemberInstance member = cls.resolve(type, id);	// cls is already the correct version
 
 		if (member == null) {
@@ -162,7 +181,7 @@ public final class PackageAccessChecker {
 
 		String mappedName, mappedDesc;
 
-		if (type == MemberType.FIELD) {
+		if (type == TrMember.MemberType.FIELD) {
 			mappedName = remapper.mapFieldName(owner, name, desc);
 			mappedDesc = remapper.mapDesc(desc);
 		} else {
@@ -181,7 +200,7 @@ public final class PackageAccessChecker {
 					member.isProtected() ? "protected" : "package-private",
 							type.name().toLowerCase(Locale.ENGLISH),
 							remapper.map(member.cls.getName()),
-							MemberInstance.getId(type, mappedName, mappedDesc, remapper.remapper.ignoreFieldDesc));
+							MemberInstance.getId(type, mappedName, mappedDesc, remapper.tr.ignoreFieldDesc));
 
 			if (inaccessible == null) {
 				inaccessible = memberMsg;
@@ -195,8 +214,8 @@ public final class PackageAccessChecker {
 				mappedAccessor,
 				inaccessible);
 
-		if (!clsAccessible) remapper.remapper.classesToMakePublic.add(cls);
-		if (!memberAccessible) remapper.remapper.membersToMakePublic.add(member);
+		if (!clsAccessible) remapper.tr.classesToMakePublic.add(cls);
+		if (!memberAccessible) remapper.tr.membersToMakePublic.add(member);
 	}
 
 	private static boolean isSamePackage(String clsA, int pkgEnd, String clsB) {

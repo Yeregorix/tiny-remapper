@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2016, 2018 Player, asie
+ * Copyright (c) 2016, 2018, Player, asie
+ * Copyright (c) 2016, 2021, FabricMC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -191,11 +192,13 @@ public class OutputConsumerPath implements BiConsumer<String, byte[]>, Closeable
 	public void accept(String clsName, byte[] data) {
 		if (classNameFilter != null && !classNameFilter.test(clsName)) return;
 
+		Path dstFile = null;
+
 		try {
 			if (lock != null) lock.lock();
 			if (closed) throw new IllegalStateException("consumer already closed");
 
-			Path dstFile = dstDir.resolve(clsName + classSuffix);
+			dstFile = dstDir.resolve(clsName + classSuffix);
 
 			if (isJarFs && Files.exists(dstFile)) {
 				if (Files.isDirectory(dstFile)) throw new FileAlreadyExistsException("dst file "+dstFile+" is a directory");
@@ -206,7 +209,7 @@ public class OutputConsumerPath implements BiConsumer<String, byte[]>, Closeable
 			createParentDirs(dstFile);
 			Files.write(dstFile, data);
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new UncheckedIOException("error writing to "+dstFile, e);
 		} finally {
 			if (lock != null) lock.unlock();
 		}

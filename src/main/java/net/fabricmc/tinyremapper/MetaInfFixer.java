@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2016, 2018, Player, asie
+ * Copyright (c) 2021, FabricMC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package net.fabricmc.tinyremapper;
 
 import java.io.BufferedOutputStream;
@@ -21,16 +39,17 @@ public class MetaInfFixer implements OutputConsumerPath.ResourceRemapper {
 
 	@Override
 	public boolean canTransform(TinyRemapper remapper, Path relativePath) {
-		return shouldStripForFixMeta(relativePath)
-				|| relativePath.getFileName().toString().equals("MANIFEST.MF")
-				|| (remapper != null && relativePath.getNameCount() == 3 && relativePath.getName(1).toString().equals("services"));
+		return relativePath.startsWith("META-INF")
+				&& (shouldStripForFixMeta(relativePath)
+						|| relativePath.getFileName().toString().equals("MANIFEST.MF")
+						|| (remapper != null && relativePath.getNameCount() == 3 && relativePath.getName(1).toString().equals("services")));
 	}
 
 	@Override
 	public void transform(Path destinationDirectory, Path relativePath, InputStream input, TinyRemapper remapper) throws IOException {
 		String fileName = relativePath.getFileName().toString();
 
-		if (fileName.equals("MANIFEST.MF")) {
+		if (relativePath.getNameCount() == 2 && fileName.equals("MANIFEST.MF")) {
 			Manifest manifest = new Manifest(input);
 			fixManifest(manifest, remapper);
 
@@ -67,10 +86,10 @@ public class MetaInfFixer implements OutputConsumerPath.ResourceRemapper {
 				|| fileName.startsWith("SIG-");
 	}
 
-	private static String mapFullyQualifiedClassName(String name, TinyRemapper remapper) {
+	private static String mapFullyQualifiedClassName(String name, TinyRemapper tr) {
 		assert name.indexOf('/') < 0;
 
-		return remapper.mapClass(name.replace('.', '/')).replace('/', '.');
+		return tr.defaultState.remapper.map(name.replace('.', '/')).replace('/', '.');
 	}
 
 	private static void fixManifest(Manifest manifest, TinyRemapper remapper) {

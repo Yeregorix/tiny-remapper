@@ -2,13 +2,14 @@ plugins {
 	id 'java'
 	id 'maven-publish'
 	id 'checkstyle'
+	id 'com.diffplug.spotless' version '5.14.2'
 	id 'com.github.johnrengelman.shadow' version '6.1.0'
 }
 
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
-version = '1.2.0'
+version = '1.3.0'
 
 def ENV = System.getenv()
 
@@ -67,6 +68,14 @@ jar {
 checkstyle {
 	configFile = file("checkstyle.xml")
 	toolVersion = '8.31'
+}
+
+spotless {
+	ratchetFrom 'origin/master'
+
+	java {
+		licenseHeaderFile(rootProject.file('HEADER')).yearSeparator(', ')
+	}
 }
 
 publishing {
