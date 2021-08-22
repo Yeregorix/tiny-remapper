@@ -20,59 +20,26 @@ package net.fabricmc.tinyremapper;
 
 import net.fabricmc.tinyremapper.IMappingProvider.MappingAcceptor;
 import net.fabricmc.tinyremapper.IMappingProvider.Member;
-import net.fabricmc.tinyremapper.MemberInstance.MemberType;
+import net.fabricmc.tinyremapper.api.TrClass;
+import net.fabricmc.tinyremapper.api.TrEnvironment;
+import net.fabricmc.tinyremapper.api.TrMember;
+import net.fabricmc.tinyremapper.api.TrMember.MemberType;
 import org.objectweb.asm.*;
 import org.objectweb.asm.commons.Remapper;
 import org.objectweb.asm.util.CheckClassAdapter;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import java.util.zip.ZipError;
-
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.FieldVisitor;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.commons.Remapper;
-import org.objectweb.asm.util.CheckClassAdapter;
-
-import net.fabricmc.tinyremapper.IMappingProvider.MappingAcceptor;
-import net.fabricmc.tinyremapper.IMappingProvider.Member;
-import net.fabricmc.tinyremapper.api.TrClass;
-import net.fabricmc.tinyremapper.api.TrEnvironment;
-import net.fabricmc.tinyremapper.api.TrMember;
-import net.fabricmc.tinyremapper.api.TrMember.MemberType;
 
 public class TinyRemapper {
 	public static class Builder {
@@ -527,7 +494,9 @@ public class TinyRemapper {
 				}
 			} else {
 				if (out == readClasses) {
-					mergedClasspath = false;
+					for (MrjState value : mrjStates.values()) {
+						value.mergedClasspath = false;
+					}
 					mappingsDirty = true;
 				}
 
@@ -606,14 +575,14 @@ public class TinyRemapper {
 	private interface MrjPath {
 		byte[] bytes() throws IOException;
 
-		String pathOrNull();
+		Path pathOrNull();
 	}
 
 	private static class StaticMrjPath implements MrjPath {
 		private final byte[] bytes;
-		private final String path;
+		private final Path path;
 
-		public StaticMrjPath(byte[] bytes, String path) {
+		public StaticMrjPath(byte[] bytes, Path path) {
 			this.bytes = bytes;
 			this.path = path;
 		}
@@ -624,7 +593,7 @@ public class TinyRemapper {
 		}
 
 		@Override
-		public String pathOrNull() {
+		public Path pathOrNull() {
 			return path;
 		}
 	}
@@ -649,52 +618,43 @@ public class TinyRemapper {
 		}
 
 		@Override
-		public String pathOrNull() {
-			return path.toString();
+		public Path pathOrNull() {
+			return path;
 		}
 	}
 
-		private static int analyzeMrjVersion(MrjPath file, String name) {
-			String pathOrNull = file.pathOrNull();
-			if (pathOrNull == null) {
-				return ClassInstance.MRJ_DEFAULT;
-			}
-			if (File.separator.equals("/")) {
-				return analyzeMrjVersion(pathOrNull, name);
-			} else if (File.separator.equals("\\")) {
-				return analyzeMrjVersion(pathOrNull.replace('\\', '/'), name);
-			} else {
-				throw new RuntimeException("Unknown file separator detected.");
-			}
+	private static int analyzeMrjVersion(MrjPath file, String name) {
+		Path pathOrNull = file.pathOrNull();
+		if (pathOrNull == null) {
+			return ClassInstance.MRJ_DEFAULT;
+		}
+		return analyzeMrjVersion(pathOrNull, name);
+	}
+
+	/**
+	 * Determine the MRJ version of the supplied class file and name.
+	 *
+	 * <p>This assumes that the file path follows the usual META-INF/versions/{@code <version>}/pkg/for/cls.class form.
+	 */
+	private static int analyzeMrjVersion(Path file, String name) {
+		assert file.getFileName().toString().endsWith(".class");
+
+		int pkgCount = 0;
+		int pos = 0;
+
+		while ((pos = name.indexOf('/', pos) + 1) > 0) {
+			pkgCount++;
 		}
 
-		/**
-		 * Determine the MRJ version of the supplied class file and name.
-		 *
-		 * <p>This assumes that the file path follows the usual META-INF/versions/{@code <version>}/pkg/for/cls.class form.
-		 */
-		private static int analyzeMrjVersion(MrjPath file, String name) {
-			assert file.getFileName().toString().endsWith(".class");
-
-			int pkgCount = 0;
-			int pos = 0;
-
-			while ((pos = name.indexOf('/', pos) + 1) > 0) {
-				pkgCount++;
-			}
-		}
-
-	private static int analyzeMrjVersion(String file, String name) {
 		name = name + ".class";
 
-				int pathNameCount = file.getNameCount();
-				int pathNameOffset = pathNameCount - pkgCount - 1; // path index for root package
+		int pathNameCount = file.getNameCount();
+		int pathNameOffset = pathNameCount - pkgCount - 1; // path index for root package
 
-
-				if (pathNameOffset >= 3
-				&& file.getName(pathNameOffset - 3).toString().equals("META-INF") // root pkg is in META-INF/x/x
-				&& file.getName(pathNameOffset - 2).toString().equals("versions") // root pkg is in META-INF/versions/x
-				&& file.subpath(pathNameOffset, pathNameCount).toString().replace('\\', '/').regionMatches(0, name, 0, name.length())) { // verify class name == path from root pkg dir, ignores suffix like .class
+		if (pathNameOffset >= 3
+		    && file.getName(pathNameOffset - 3).toString().equals("META-INF") // root pkg is in META-INF/x/x
+		    && file.getName(pathNameOffset - 2).toString().equals("versions") // root pkg is in META-INF/versions/x
+		    && file.subpath(pathNameOffset, pathNameCount).toString().replace('\\', '/').regionMatches(0, name, 0, name.length())) { // verify class name == path from root pkg dir, ignores suffix like .class
 			try {
 				return Integer.parseInt(file.getName(pathNameOffset - 1).toString());
 			} catch (NumberFormatException e) {
@@ -752,7 +712,9 @@ public class TinyRemapper {
 			methodMap.clear();
 			methodArgMap.clear();
 			fieldMap.clear();
-			unmergeClasses();
+			for (MrjState state : mrjStates.values()) {
+				unmergeClasses(state);
+			}
 
 			mappingsDirty = true;
 		}
@@ -877,7 +839,7 @@ public class TinyRemapper {
 	}
 
 	private void unmergeClasses(MrjState state) {
-		mergedClasspath = false;
+		state.mergedClasspath = false;
 		for (ClassInstance node : state.classes.values()) {
 			node.parents.clear();
 			node.children.clear();
@@ -885,8 +847,8 @@ public class TinyRemapper {
 	}
 
 	private void mergeClasspath(MrjState state) {
-		if (mergedClasspath) return;
-		mergedClasspath = true;
+		if (state.mergedClasspath) return;
+		state.mergedClasspath = true;
 		for (ClassInstance node : state.classes.values()) {
 			if (node.isInput) continue;
 			assert node.getSuperName() != null;
@@ -909,21 +871,21 @@ public class TinyRemapper {
 		}
 	}
 
-	private void mergeInput() {
-		for (ClassInstance node : classes.values().parallelStream()
+	private void mergeInput(MrjState state) {
+		for (ClassInstance node : state.classes.values().parallelStream()
 				.filter(node -> node.isInput)
 				.collect(Collectors.toList())) {
 			assert node.getSuperName() != null;
 
-			ClassInstance parent = classes.get(node.getSuperName());
+			ClassInstance parent = state.classes.get(node.getSuperName());
 
 			if (parent != null) {
 				node.parents.add(parent);
 				parent.children.add(node);
 			}
 
-			for (String iface : node.getInterfaces()) {
-				parent = classes.get(iface);
+			for (ClassInstance interfaceInstance : node.getInterfaces()) {
+				parent = interfaceInstance;
 
 				if (parent != null) {
 					node.parents.add(parent);
@@ -933,8 +895,8 @@ public class TinyRemapper {
 		}
 	}
 
-	private void unmergeInput() {
-		classes.values().parallelStream()
+	private void unmergeInput(MrjState state) {
+		state.classes.values().parallelStream()
 				.filter(node -> node.isInput)
 				.flatMap(node -> node.parents.stream())
 				.distinct()
@@ -944,7 +906,7 @@ public class TinyRemapper {
 	private void propagate(MrjState state) {
 		if (skipPropagate) return;
 		conflicts.clear();
-		classes.values().parallelStream().forEach(value -> {
+		state.classes.values().parallelStream().forEach(value -> {
 			value.resolvedMembers = new ConcurrentHashMap<>();
 			for (MemberInstance member : value.getMembers()) {
 				member.forceSetNewName(null);
@@ -1209,11 +1171,18 @@ public class TinyRemapper {
 	}
 
 	public void removeInput() {
-		synchronized (this) {
-			unmergeInput();
-			classes.values().removeIf(node -> node.isInput);
+		for (MrjState state : mrjStates.values()) {
+			removeInput(state);
 		}
 	}
+
+	public void removeInput(MrjState state) {
+		synchronized (this) {
+			unmergeInput(state);
+			state.classes.values().removeIf(node -> node.isInput);
+		}
+	}
+
 	public void prepareClasses() {
 		synchronized (this) {
 			_prepareClasses();
@@ -1266,8 +1235,6 @@ public class TinyRemapper {
 
 		_prepareClasses();
 		loadMappings(!cacheMappings);
-		mergeClasspath();
-		propagate();
 	}
 
 	private void mrjRefresh(MrjState state) {
@@ -1279,6 +1246,7 @@ public class TinyRemapper {
 		assert state.classes.values().stream().map(ClassInstance::getName).distinct().count() == state.classes.size();
 
 		mergeInput(state);
+		mergeClasspath(state);
 		propagate(state);
 
 		for (StateProcessor processor : stateProcessors) {
@@ -1531,6 +1499,7 @@ public class TinyRemapper {
 		final int version;
 		final Map<String, ClassInstance> classes = new HashMap<>();
 		final AsmRemapper remapper;
+		boolean mergedClasspath = false;
 		volatile boolean dirty = true;
 	}
 
@@ -1588,7 +1557,6 @@ public class TinyRemapper {
 	private final int threadCount;
 	private final ExecutorService threadPool;
 
-	private boolean mergedClasspath = false;
 	private boolean mappingsDirty = true;
 	private volatile boolean dirty = true; // volatile to make the state debug asserts more reliable, shouldn't actually see concurrent modifications
 	private Map<ClassInstance, byte[]> outputBuffer;

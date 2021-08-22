@@ -298,8 +298,8 @@ final class AsmClassRemapper extends VisitTrackingClassRemapper {
 					|| bsm.getOwner().equals("java/lang/runtime/ObjectMethods")) {
 				return null;
 			} else {
-				if (remapper.remapper.logUnknownInvokeDynamic) {
-					remapper.remapper.logger.accept(String.format("unknown invokedynamic bsm: %s/%s%s (tag=%d iif=%b)%n", bsm.getOwner(), bsm.getName(), bsm.getDesc(), bsm.getTag(), bsm.isInterface()));
+				if (remapper.tr.logUnknownInvokeDynamic) {
+					remapper.tr.logger.accept(String.format("unknown invokedynamic bsm: %s/%s%s (tag=%d iif=%b)%n", bsm.getOwner(), bsm.getName(), bsm.getDesc(), bsm.getTag(), bsm.isInterface()));
 				}
 
 				return null;
