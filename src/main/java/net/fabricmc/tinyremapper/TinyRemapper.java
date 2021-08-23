@@ -877,15 +877,15 @@ public class TinyRemapper {
 				.collect(Collectors.toList())) {
 			assert node.getSuperName() != null;
 
-			ClassInstance parent = state.classes.get(node.getSuperName());
+			ClassInstance parent = state.getClass(node.getSuperName());
 
 			if (parent != null) {
 				node.parents.add(parent);
 				parent.children.add(node);
 			}
 
-			for (ClassInstance interfaceInstance : node.getInterfaces()) {
-				parent = interfaceInstance;
+			for (String iface : node.getInterfaceNames0()) {
+				parent = state.getClass(iface);
 
 				if (parent != null) {
 					node.parents.add(parent);
@@ -1235,6 +1235,9 @@ public class TinyRemapper {
 
 		_prepareClasses();
 		loadMappings(!cacheMappings);
+
+		assert dirty;
+		dirty = false;
 	}
 
 	private void mrjRefresh(MrjState state) {
