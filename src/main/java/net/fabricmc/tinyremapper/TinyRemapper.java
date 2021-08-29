@@ -714,6 +714,7 @@ public class TinyRemapper {
 			fieldMap.clear();
 			for (MrjState state : mrjStates.values()) {
 				unmergeClasses(state);
+				state.dirty = true;
 			}
 
 			mappingsDirty = true;
@@ -787,6 +788,7 @@ public class TinyRemapper {
 			mappingsDirty = true;
 			mappingProviders.clear();
 			mappingProviders.addAll(providers);
+			dirty = true;
 		}
 	}
 
