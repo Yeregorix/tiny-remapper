@@ -54,11 +54,11 @@ public class NamedMappable implements IMappable<String> {
 		}
 
 		Collection<String> collection = targets.stream()
-				.map(target -> data.resolver.resolveMember(target, name, desc, ResolveUtility.FLAG_UNIQUE | ResolveUtility.FLAG_RECURSIVE))
-				.filter(Optional::isPresent)
-				.map(Optional::get)
-				.map(data.mapper::mapName)
-				.distinct().collect(Collectors.toList());
+					.map(target -> data.resolver.resolveMember(target, name, desc, ResolveUtility.FLAG_UNIQUE | ResolveUtility.FLAG_RECURSIVE))
+					.filter(Optional::isPresent)
+					.map(Optional::get)
+					.map(data.mapper::mapName)
+					.distinct().collect(Collectors.toList());
 
 		if (collection.size() > 1) {
 			data.logger.error(String.format(Message.CONFLICT_MAPPING, this.name, collection));

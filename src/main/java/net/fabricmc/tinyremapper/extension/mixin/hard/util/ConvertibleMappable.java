@@ -46,14 +46,15 @@ public abstract class ConvertibleMappable extends HardTargetMappable {
 	}
 
 	protected abstract IConvertibleString getName();
+
 	protected abstract String getDesc();
 
 	protected Stream<String> mapMultiTarget(IConvertibleString name, String desc) {
 		return targets.stream()
-				.map(target -> Pair.of(name, data.resolver.resolveMember(target, name.getConverted(), desc, ResolveUtility.FLAG_UNIQUE | ResolveUtility.FLAG_RECURSIVE)))
-				.filter(x -> x.second().isPresent())
-				.map(x -> Pair.of(x.first(), data.mapper.mapName(x.second().get())))
-				.map(x -> x.first().getReverted(x.second()));
+					.map(target -> Pair.of(name, data.resolver.resolveMember(target, name.getConverted(), desc, ResolveUtility.FLAG_UNIQUE | ResolveUtility.FLAG_RECURSIVE)))
+					.filter(x -> x.second().isPresent())
+					.map(x -> Pair.of(x.first(), data.mapper.mapName(x.second().get())))
+					.map(x -> x.first().getReverted(x.second()));
 	}
 
 	@Override

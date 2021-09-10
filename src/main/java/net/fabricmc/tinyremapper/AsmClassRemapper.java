@@ -34,7 +34,6 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.TypePath;
-import org.objectweb.asm.commons.AnnotationRemapper;
 import org.objectweb.asm.commons.FieldRemapper;
 import org.objectweb.asm.commons.MethodRemapper;
 import org.objectweb.asm.commons.Remapper;
@@ -697,7 +696,7 @@ final class AsmClassRemapper extends VisitTrackingClassRemapper {
 	private static class AsmAnnotationRemapper extends AnnotationVisitor {
 		protected final Remapper remapper;
 
-		public AsmAnnotationRemapper(String descriptor, AnnotationVisitor annotationVisitor, Remapper remapper, String annotationDesc) {
+		AsmAnnotationRemapper(String descriptor, AnnotationVisitor annotationVisitor, Remapper remapper, String annotationDesc) {
 			super(Opcodes.ASM9, annotationVisitor);
 			this.remapper = remapper;
 

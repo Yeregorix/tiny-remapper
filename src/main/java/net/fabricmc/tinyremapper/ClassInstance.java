@@ -18,7 +18,6 @@
 
 package net.fabricmc.tinyremapper;
 
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;

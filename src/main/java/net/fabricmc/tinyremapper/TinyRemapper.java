@@ -18,32 +18,61 @@
 
 package net.fabricmc.tinyremapper;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.commons.Remapper;
+import org.objectweb.asm.util.CheckClassAdapter;
+
 import net.fabricmc.tinyremapper.IMappingProvider.MappingAcceptor;
 import net.fabricmc.tinyremapper.IMappingProvider.Member;
 import net.fabricmc.tinyremapper.api.TrClass;
 import net.fabricmc.tinyremapper.api.TrEnvironment;
 import net.fabricmc.tinyremapper.api.TrMember;
 import net.fabricmc.tinyremapper.api.TrMember.MemberType;
-import org.objectweb.asm.*;
-import org.objectweb.asm.commons.Remapper;
-import org.objectweb.asm.util.CheckClassAdapter;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 public class TinyRemapper {
 	public static class Builder {
-		private Builder() { }
+		private Builder() {
+		}
 
 		public Builder withMappings(IMappingProvider provider) {
 			mappingProviders.add(provider);
@@ -393,6 +422,7 @@ public class TinyRemapper {
 	private CompletableFuture<List<ClassInstance>> readClassAsync(boolean isInput, byte[]... inputs) {
 		InputTag[] tags = singleInputTags.get().get(null);
 		List<CompletableFuture<ClassInstance>> futures = new ArrayList<>();
+
 		for (byte[] entry : inputs) {
 			futures.add(CompletableFuture.supplyAsync(() -> {
 				try {
@@ -402,6 +432,7 @@ public class TinyRemapper {
 				}
 			}, threadPool));
 		}
+
 		dirty = true;
 		return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
 				.thenApply(ignore -> futures.stream()
@@ -497,6 +528,7 @@ public class TinyRemapper {
 					for (MrjState value : mrjStates.values()) {
 						value.mergedClasspath = false;
 					}
+
 					mappingsDirty = true;
 				}
 
@@ -523,10 +555,12 @@ public class TinyRemapper {
 					logger.accept("Failed to read " + file.toAbsolutePath());
 					throw throwable;
 				}
+
 				return Collections.emptyList();
 			}, threadPool);
 		} else if (isParentLevel) {
 			List<CompletableFuture<List<ClassInstance>>> ret = new ArrayList<>();
+
 			try {
 				if (Files.isDirectory(file)) {
 					Files.walkFileTree(file, new SimpleFileVisitor<Path>() {
@@ -558,6 +592,7 @@ public class TinyRemapper {
 						throw new RuntimeException(e);
 					}
 				}
+
 				return CompletableFuture.allOf(ret.toArray(new CompletableFuture[0])).thenApply(unused ->
 						ret.stream()
 								.map(CompletableFuture::join)
@@ -582,7 +617,7 @@ public class TinyRemapper {
 		private final byte[] bytes;
 		private final Path path;
 
-		public StaticMrjPath(byte[] bytes, Path path) {
+		StaticMrjPath(byte[] bytes, Path path) {
 			this.bytes = bytes;
 			this.path = path;
 		}
@@ -602,7 +637,7 @@ public class TinyRemapper {
 		private byte[] bytes;
 		private Path path;
 
-		public FileMrjPath(Path path) {
+		FileMrjPath(Path path) {
 			this.path = path;
 		}
 
@@ -625,9 +660,11 @@ public class TinyRemapper {
 
 	private static int analyzeMrjVersion(MrjPath file, String name) {
 		Path pathOrNull = file.pathOrNull();
+
 		if (pathOrNull == null) {
 			return ClassInstance.MRJ_DEFAULT;
 		}
+
 		return analyzeMrjVersion(pathOrNull, name);
 	}
 
@@ -652,9 +689,9 @@ public class TinyRemapper {
 		int pathNameOffset = pathNameCount - pkgCount - 1; // path index for root package
 
 		if (pathNameOffset >= 3
-		    && file.getName(pathNameOffset - 3).toString().equals("META-INF") // root pkg is in META-INF/x/x
-		    && file.getName(pathNameOffset - 2).toString().equals("versions") // root pkg is in META-INF/versions/x
-		    && file.subpath(pathNameOffset, pathNameCount).toString().replace('\\', '/').regionMatches(0, name, 0, name.length())) { // verify class name == path from root pkg dir, ignores suffix like .class
+				&& file.getName(pathNameOffset - 3).toString().equals("META-INF") // root pkg is in META-INF/x/x
+				&& file.getName(pathNameOffset - 2).toString().equals("versions") // root pkg is in META-INF/versions/x
+				&& file.subpath(pathNameOffset, pathNameCount).toString().replace('\\', '/').regionMatches(0, name, 0, name.length())) { // verify class name == path from root pkg dir, ignores suffix like .class
 			try {
 				return Integer.parseInt(file.getName(pathNameOffset - 1).toString());
 			} catch (NumberFormatException e) {
@@ -712,6 +749,7 @@ public class TinyRemapper {
 			methodMap.clear();
 			methodArgMap.clear();
 			fieldMap.clear();
+
 			for (MrjState state : mrjStates.values()) {
 				unmergeClasses(state);
 				state.dirty = true;
@@ -793,10 +831,14 @@ public class TinyRemapper {
 	}
 
 	public boolean equalsMappings(Set<IMappingProvider> other) {
-		if (other == mappingProviders)
+		if (other == mappingProviders) {
 			return true;
-		if (other.size() != mappingProviders.size())
+		}
+
+		if (other.size() != mappingProviders.size()) {
 			return false;
+		}
+
 		return mappingProviders.containsAll(other);
 	}
 
@@ -842,6 +884,7 @@ public class TinyRemapper {
 
 	private void unmergeClasses(MrjState state) {
 		state.mergedClasspath = false;
+
 		for (ClassInstance node : state.classes.values()) {
 			node.parents.clear();
 			node.children.clear();
@@ -851,6 +894,7 @@ public class TinyRemapper {
 	private void mergeClasspath(MrjState state) {
 		if (state.mergedClasspath) return;
 		state.mergedClasspath = true;
+
 		for (ClassInstance node : state.classes.values()) {
 			if (node.isInput) continue;
 			assert node.getSuperName() != null;
@@ -910,6 +954,7 @@ public class TinyRemapper {
 		conflicts.clear();
 		state.classes.values().parallelStream().forEach(value -> {
 			value.resolvedMembers = new ConcurrentHashMap<>();
+
 			for (MemberInstance member : value.getMembers()) {
 				member.forceSetNewName(null);
 				member.newNameOriginatingCls = null;
@@ -1086,8 +1131,10 @@ public class TinyRemapper {
 						if (!cls.isInput) continue;
 
 						if (cls.data == null) {
-							if (!hasInputTags && !keepInputData)
+							if (!hasInputTags && !keepInputData) {
 								throw new IllegalStateException("invoking apply multiple times without input tags or hasInputData");
+							}
+
 							throw new IllegalStateException("data for input class " + cls + " is missing?!");
 						}
 
@@ -1101,7 +1148,7 @@ public class TinyRemapper {
 
 				if (fixPackageAccess) {
 					if (needsFixes) {
-							logger.accept(String.format("Fixing access for %d classes and %d members.", classesToMakePublic.size(), membersToMakePublic.size()));
+						logger.accept(String.format("Fixing access for %d classes and %d members.", classesToMakePublic.size(), membersToMakePublic.size()));
 					}
 
 					for (Map.Entry<ClassInstance, byte[]> entry : outputBuffer.entrySet()) {
@@ -1151,7 +1198,7 @@ public class TinyRemapper {
 	 */
 	private void fixMrjClasses(Set<Integer> newVersions) {
 		// ensure the new version is added from lowest to highest
-		for (int newVersion: newVersions.stream().sorted().collect(Collectors.toList())) {
+		for (int newVersion : newVersions.stream().sorted().collect(Collectors.toList())) {
 			MrjState newState = new MrjState(this, newVersion);
 
 			if (mrjStates.put(newVersion, newState) != null) {
@@ -1334,7 +1381,7 @@ public class TinyRemapper {
 			@Override
 			public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
 				if (finalClsMembersToMakePublic != null
-				    && finalClsMembersToMakePublic.contains(MemberInstance.getFieldId(name, descriptor, ignoreFieldDesc))) {
+						&& finalClsMembersToMakePublic.contains(MemberInstance.getFieldId(name, descriptor, ignoreFieldDesc))) {
 					access = (access & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
 				}
 
@@ -1344,7 +1391,7 @@ public class TinyRemapper {
 			@Override
 			public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
 				if (finalClsMembersToMakePublic != null
-				    && finalClsMembersToMakePublic.contains(MemberInstance.getMethodId(name, descriptor))) {
+						&& finalClsMembersToMakePublic.contains(MemberInstance.getMethodId(name, descriptor))) {
 					access = (access & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
 				}
 
