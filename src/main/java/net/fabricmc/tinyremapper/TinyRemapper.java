@@ -1006,10 +1006,11 @@ public class TinyRemapper {
 
 	private void handleConflicts(MrjState state) {
 		if (skipConflictsChecking) return;
-		Set<String> testSet = new HashSet<>();
-		boolean targetNameCheckFailed = false;
 
-		for (ClassInstance cls : state.classes.values()) {
+		boolean targetNameCheckFailed = state.classes.values().stream().anyMatch(cls -> {
+			boolean _targetNameCheckFailed = false;
+			Set<String> testSet = new HashSet<>();
+
 			for (MemberInstance member : cls.getMembers()) {
 				String name = member.getNewMappedName();
 				if (name == null) name = member.name;
@@ -1018,10 +1019,7 @@ public class TinyRemapper {
 			}
 
 			if (testSet.size() != cls.getMembers().size()) {
-				if (!targetNameCheckFailed) {
-					targetNameCheckFailed = true;
-					logger.accept("Mapping target name conflicts detected:");
-				}
+				_targetNameCheckFailed = true;
 
 				Map<String, List<MemberInstance>> duplicates = new HashMap<>();
 
@@ -1060,7 +1058,11 @@ public class TinyRemapper {
 				}
 			}
 
-			testSet.clear();
+			return _targetNameCheckFailed;
+		});
+
+		if (targetNameCheckFailed) {
+			logger.accept("Mapping target name conflicts detected:");
 		}
 
 		boolean unfixableConflicts = false;
