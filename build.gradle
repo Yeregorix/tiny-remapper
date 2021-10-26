@@ -9,7 +9,7 @@ plugins {
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
-version = '1.4.' + (System.getenv("GITHUB_RUN_NUMBER") ?: "9999")
+version = '1.5.' + (System.getenv("GITHUB_RUN_NUMBER") ?: "9999")
 
 def ENV = System.getenv()
 

@@ -166,6 +166,14 @@ public class TinyRemapper {
 			return this;
 		}
 
+		/**
+		 * Whether to copy lv names from other local variables if the original name was missing or invalid.
+		 */
+		public Builder inferNameFromSameLvIndex(boolean value) {
+			this.inferNameFromSameLvIndex = value;
+			return this;
+		}
+
 		@Deprecated
 		public Builder extraAnalyzeVisitor(ClassVisitor visitor) {
 			return extraAnalyzeVisitor((mrjVersion, className, next) -> {
@@ -236,7 +244,7 @@ public class TinyRemapper {
 					forcePropagation, propagatePrivate,
 					propagateBridges, propagateRecordComponents,
 					removeFrames, ignoreConflicts, resolveMissing, checkPackageAccess || fixPackageAccess, fixPackageAccess,
-					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, invalidLvNamePattern,
+					rebuildSourceFilenames, skipLocalMapping, renameInvalidLocals, invalidLvNamePattern, inferNameFromSameLvIndex,
 					skipConflictsChecking, cacheMappings, skipPropagate, logUnknownInvokeDynamic,
 					analyzeVisitors, stateProcessors, preApplyVisitors, postApplyVisitors,
 					extraRemapper, logger);
@@ -261,6 +269,7 @@ public class TinyRemapper {
 		private boolean skipLocalMapping = false;
 		private boolean renameInvalidLocals = false;
 		private Pattern invalidLvNamePattern;
+		private boolean inferNameFromSameLvIndex;
 		private boolean skipConflictsChecking = false;
 		private boolean cacheMappings = false;
 		private boolean skipPropagate = false;
@@ -301,7 +310,7 @@ public class TinyRemapper {
 			boolean fixPackageAccess,
 			boolean rebuildSourceFilenames,
 			boolean skipLocalMapping,
-			boolean renameInvalidLocals, Pattern invalidLvNamePattern,
+			boolean renameInvalidLocals, Pattern invalidLvNamePattern, boolean inferNameFromSameLvIndex,
 			boolean skipConflictsChecking,
 			boolean cacheMappings,
 			boolean skipPropagate,
@@ -328,6 +337,7 @@ public class TinyRemapper {
 		this.skipLocalMapping = skipLocalMapping;
 		this.renameInvalidLocals = renameInvalidLocals;
 		this.invalidLvNamePattern = invalidLvNamePattern;
+		this.inferNameFromSameLvIndex = inferNameFromSameLvIndex;
 		this.skipConflictsChecking = skipConflictsChecking;
 		this.cacheMappings = cacheMappings;
 		this.skipPropagate = skipPropagate;
@@ -1336,7 +1346,8 @@ public class TinyRemapper {
 			visitor = postApplyVisitors.get(i).insertApplyVisitor(cls, visitor);
 		}
 
-		visitor = new AsmClassRemapper(visitor, cls.getContext().remapper, rebuildSourceFilenames, checkPackageAccess, skipLocalMapping, renameInvalidLocals, invalidLvNamePattern);
+		visitor = new AsmClassRemapper(visitor, cls.getContext().remapper, rebuildSourceFilenames,
+				checkPackageAccess, skipLocalMapping, renameInvalidLocals, invalidLvNamePattern, inferNameFromSameLvIndex);
 
 		for (int i = preApplyVisitors.size() - 1; i >= 0; i--) {
 			visitor = preApplyVisitors.get(i).insertApplyVisitor(cls, visitor);
@@ -1596,6 +1607,7 @@ public class TinyRemapper {
 	private final boolean skipLocalMapping;
 	private final boolean renameInvalidLocals;
 	private final Pattern invalidLvNamePattern;
+	private final boolean inferNameFromSameLvIndex;
 	private final boolean skipConflictsChecking;
 	private final boolean cacheMappings;
 	private final boolean skipPropagate;
