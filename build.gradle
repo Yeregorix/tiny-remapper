@@ -72,6 +72,7 @@ checkstyle {
 
 spotless {
 	ratchetFrom 'origin/master'
+	enforceCheck false
 
 	java {
 		licenseHeaderFile(rootProject.file('HEADER')).yearSeparator(', ')
