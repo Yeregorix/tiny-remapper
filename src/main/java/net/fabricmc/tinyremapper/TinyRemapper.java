@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016, 2018, Player, asie
- * Copyright (c) 2016, 2021, FabricMC
+ * Copyright (c) 2016, 2022, FabricMC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
@@ -725,7 +725,13 @@ public class TinyRemapper {
 
 	private ClassInstance analyze(boolean isInput, InputTag[] tags, String srcPath, MrjPath file) throws IOException {
 		byte[] data = file.bytes();
-		ClassReader reader = new ClassReader(data);
+		ClassReader reader;
+
+		try {
+			reader = new ClassReader(data);
+		} catch (Throwable t) {
+			throw new RuntimeException("error analyzing "+file+" from "+srcPath, t);
+		}
 
 		if ((reader.getAccess() & Opcodes.ACC_MODULE) != 0) return null; // special attribute for module-info.class, can't be a regular class
 
