@@ -20,9 +20,6 @@ package net.fabricmc.tinyremapper;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.FileSystem;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -472,7 +469,7 @@ public class TinyRemapper {
 	private CompletableFuture<List<ClassInstance>> read(Path[] inputs, boolean isInput, InputTag tag) {
 		InputTag[] tags = singleInputTags.get().get(tag);
 		List<CompletableFuture<List<ClassInstance>>> futures = new ArrayList<>();
-		List<FileSystem> fsToClose = Collections.synchronizedList(new ArrayList<>());
+		List<FileSystemReference> fsToClose = Collections.synchronizedList(new ArrayList<>());
 
 		for (Path input : inputs) {
 			futures.add(read(input, isInput, tags, fsToClose, true));
@@ -498,9 +495,9 @@ public class TinyRemapper {
 		}
 
 		return ret.whenComplete((res, exc) -> {
-			for (FileSystem fs : fsToClose) {
+			for (FileSystemReference fs : fsToClose) {
 				try {
-					FileSystemHandler.close(fs);
+					fs.close();
 				} catch (IOException e) {
 					// ignore
 				}
@@ -559,11 +556,11 @@ public class TinyRemapper {
 		}
 	}
 
-	private CompletableFuture<List<ClassInstance>> read(final Path file, boolean isInput, InputTag[] tags, final List<FileSystem> fsToClose, boolean isParentLevel) {
+	private CompletableFuture<List<ClassInstance>> read(final Path file, boolean isInput, InputTag[] tags, final List<FileSystemReference> fsToClose, boolean isParentLevel) {
 		return read(file, isInput, tags, file.toString(), fsToClose, isParentLevel);
 	}
 
-	private CompletableFuture<List<ClassInstance>> read(Path file, boolean isInput, InputTag[] tags, final String srcPath, List<FileSystem> fsToClose, boolean isParentLevel) {
+	private CompletableFuture<List<ClassInstance>> read(Path file, boolean isInput, InputTag[] tags, final String srcPath, List<FileSystemReference> fsToClose, boolean isParentLevel) {
 		if (file.toString().endsWith(".class")) {
 			return CompletableFuture.supplyAsync(() -> {
 				try {
@@ -595,23 +592,18 @@ public class TinyRemapper {
 						}
 					});
 				} else {
-					try {
-						URI uri = new URI("jar:" + file.toUri());
-						FileSystem fs = FileSystemHandler.open(uri);
-						fsToClose.add(fs);
-						Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
-							@Override
-							public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-								if (file.toString().endsWith(".class")) {
-									ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
-								}
-
-								return FileVisitResult.CONTINUE;
+					FileSystemReference fs = FileSystemReference.openJar(file);
+					fsToClose.add(fs);
+					Files.walkFileTree(fs.getPath("/"), new SimpleFileVisitor<Path>() {
+						@Override
+						public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+							if (file.toString().endsWith(".class")) {
+								ret.add(read(file, isInput, tags, srcPath, fsToClose, false));
 							}
-						});
-					} catch (URISyntaxException e) {
-						throw new RuntimeException(e);
-					}
+
+							return FileVisitResult.CONTINUE;
+						}
+					});
 				}
 
 				return CompletableFuture.allOf(ret.toArray(new CompletableFuture[0])).thenApply(unused ->
