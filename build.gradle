@@ -9,11 +9,11 @@ plugins {
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
-version = '1.9.' + (System.getenv("GITHUB_RUN_NUMBER") ?: "9999")
+version = '1.9-SNAPSHOT'
 
 def ENV = System.getenv()
 
-group = 'dev.architectury'
+group = 'net.smoofyuniverse'
 archivesBaseName = 'tiny-remapper'
 
 repositories {
@@ -87,13 +87,14 @@ publishing {
 	}
 
 	repositories {
-		if (ENV.MAVEN_URL) {
-			maven {
-				url ENV.MAVEN_URL
-				credentials {
-					username ENV.MAVEN_USERNAME
-					password ENV.MAVEN_PASSWORD
-				}
+		maven {
+			url = version.endsWith('SNAPSHOT') ?
+					"https://oss.sonatype.org/content/repositories/snapshots/"
+					: "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+
+			credentials {
+				username findProperty('ossrhUsername')
+				password findProperty('ossrhPassword')
 			}
 		}
 	}
